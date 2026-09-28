@@ -458,6 +458,7 @@ export async function probeWebDavWorkspace(
 }
 
 async function putText(credentials: WebDavCredentials, url: string, text: string): Promise<void> {
+	// wwschool always creates a new document on PUT (same display name, new id).
 	const response = await request(credentials, url, 'PUT', {}, text);
 	if (!response.ok)
 		throw new WebDavError(friendlyStatus(response.status, 'die Datei speichern'), response.status);

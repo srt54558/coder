@@ -182,6 +182,7 @@
 	let remoteSyncTimer: ReturnType<typeof setTimeout> | undefined;
 	let remotePollTimer: ReturnType<typeof setInterval> | undefined;
 	let remoteSyncQueue: Promise<void> = Promise.resolve();
+	let announceRemoteSave = false;
 	let explorerToken = $state(0);
 	let sharedCode = $state<string | null>(null);
 	let viewingShare = $state(false);
@@ -397,7 +398,6 @@
 				if (ticket !== saveTicket) return true;
 				markSaved(snapshot);
 				saveErrorAnnounced = false;
-				queueRemoteSync(snapshot);
 				return true;
 			} catch {
 				if (ticket === saveTicket && !saveErrorAnnounced) {
@@ -441,6 +441,14 @@
 		remoteSyncTimer = setTimeout(() => {
 			enqueueRemote(() => syncRemoteSnapshot(copy));
 		}, REMOTE_SYNC_DELAY_MS);
+	}
+
+	function pushRemoteWorkspace(options?: { announce?: boolean }) {
+		if (!webdavCredentials || !webdavConnection || !webdavSyncState) return;
+		if (syncStatus === 'conflict') return;
+		announceRemoteSave = Boolean(options?.announce);
+		flushWorkspace();
+		queueRemoteSync($state.snapshot(workspace) as WorkspaceSnapshot);
 	}
 
 	function queueRemotePull() {
@@ -493,7 +501,12 @@
 			webdavSyncState = nextState;
 			syncError = '';
 			syncStatus = 'synced';
+			if (announceRemoteSave) {
+				announceRemoteSave = false;
+				announce('Mit wwschool gespeichert');
+			}
 		} catch (error) {
+			announceRemoteSave = false;
 			if (error instanceof WebDavConflictError) {
 				const local = $state.snapshot(workspace) as WorkspaceSnapshot;
 				syncConflict = {
@@ -857,8 +870,10 @@
 	}
 
 	function handleVisibility() {
-		if (document.visibilityState === 'hidden') flushWorkspace();
-		else queueRemotePull();
+		if (document.visibilityState === 'hidden') {
+			flushWorkspace();
+			pushRemoteWorkspace();
+		} else queueRemotePull();
 	}
 
 	function editActiveFile(value: string) {
@@ -1310,6 +1325,7 @@
 		if (event.key.toLowerCase() === 's') {
 			event.preventDefault();
 			if (viewingShare && sharedCode !== null) openSaveShare();
+			else if (webdavCredentials) pushRemoteWorkspace({ announce: true });
 			else downloadCode();
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
@@ -1679,7 +1695,10 @@
 <svelte:window
 	onkeydown={handleShortcut}
 	onbeforeunload={handleBeforeUnload}
-	onpagehide={flushWorkspace}
+	onpagehide={() => {
+		flushWorkspace();
+		pushRemoteWorkspace();
+	}}
 	onvisibilitychange={handleVisibility}
 />
 
@@ -1753,6 +1772,15 @@
 							title="Geteilte Datei ist nicht gespeichert. Ordner in Dateien wählen."
 							><Save /><span class="action-label">Speichern</span></Button
 						>
+					{:else if webdavCredentials}
+						<Button
+							variant="outline"
+							size={narrow ? 'icon-sm' : 'sm'}
+							onclick={() => pushRemoteWorkspace({ announce: true })}
+							aria-label="Mit wwschool speichern"
+							title="Mit wwschool speichern (Cmd/Strg+S)"
+							><Save /><span class="action-label">Speichern</span></Button
+						>
 					{/if}
 					<Button
 						variant="outline"
@@ -1780,6 +1808,10 @@
 							{#if webdavCredentials}
 								<p class="settings-email" title={webdavCredentials.username}>
 									{webdavCredentials.username}
+								</p>
+								<p class="settings-note">
+									wwschool legt jeden Upload als neue Datei an. Gespeichert wird mit Speichern
+									(Cmd/Strg+S) oder wenn der Tab in den Hintergrund geht.
 								</p>
 								{#if !webdavRemembered}
 									<p class="settings-note">Nur diese Sitzung</p>
