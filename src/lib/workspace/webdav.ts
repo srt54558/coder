@@ -1,16 +1,9 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import {
-	looksLikeWorkspaceArchive,
-	parseWorkspaceArchive,
-	WORKSPACE_ARCHIVE_NAME,
-	workspaceExport
-} from './archive';
-import { sanitizeWorkspace, type WorkspaceSnapshot } from './model';
+import { parseWorkspaceArchive, WORKSPACE_ARCHIVE_NAME, workspaceExport } from './archive';
+import type { WorkspaceSnapshot } from './model';
 
 const WEBDAV_ROOT = 'https://www.wwschool.de/webdav.php';
 const WORKSPACE_FILENAME = WORKSPACE_ARCHIVE_NAME;
-const LEGACY_WORKSPACE_FILENAME = 'kplus-coder-workspace.json';
-const STAGE_PREFIX = 'kplus-coder-pending-';
 const MAX_WORKSPACE_BYTES = 20_000_000;
 const DATABASE_NAME = 'kplus-python-webdav';
 const STORE_NAME = 'private-data';
@@ -50,7 +43,6 @@ export interface RemoteWorkspace {
 	snapshot: WorkspaceSnapshot;
 	hash: string;
 	etag: string | null;
-	kind: 'archive' | 'json';
 	href: string;
 }
 
@@ -225,8 +217,71 @@ function checkedUrl(value: string, parent?: string): URL {
 	return url;
 }
 
-function legacyWorkspaceHref(connection: WebDavConnection): string {
-	return new URL(LEGACY_WORKSPACE_FILENAME, checkedUrl(connection.personalHref)).href;
+function folderUrl(href: string): URL {
+	const url = checkedUrl(href);
+	if (!url.pathname.endsWith('/')) url.pathname += '/';
+	return url;
+}
+
+function childFileHref(folderHref: string, filename: string): string {
+	return new URL(filename, folderUrl(folderHref)).href;
+}
+
+function fileNameKey(name: string): string {
+	return name.trim().toLocaleLowerCase('de');
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function isWorkspaceFileName(name: string): boolean {
+	const key = fileNameKey(name);
+	const canon = fileNameKey(WORKSPACE_FILENAME);
+	if (key === canon) return true;
+	const dot = canon.lastIndexOf('.');
+	const stem = dot > 0 ? canon.slice(0, dot) : canon;
+	const ext = dot > 0 ? canon.slice(dot) : '';
+	return new RegExp(
+		`^${escapeRegExp(stem)}(?:\\s*\\(\\d+\\)|\\s+\\d+)?${escapeRegExp(ext)}(?:\\s*\\(\\d+\\))?$`,
+		'u'
+	).test(key);
+}
+
+function decodeXmlText(value: string): string {
+	return value
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'");
+}
+
+function workspaceHrefsFromPropfind(xmlText: string, scopeHref: string): string[] {
+	const scope = folderUrl(scopeHref);
+	const hrefs: string[] = [];
+	const seen = new Set<string>();
+	for (const chunk of xmlText.split(/<(?:[\w.-]+:)?response\b/iu).slice(1)) {
+		if (/<(?:[\w.-]+:)?collection\b/iu.test(chunk)) continue;
+		const hrefMatch = /<(?:[\w.-]+:)?href\s*>([^<]+)<\/(?:[\w.-]+:)?href\s*>/iu.exec(chunk);
+		if (!hrefMatch?.[1]) continue;
+		const raw = decodeXmlText(hrefMatch[1].trim());
+		if (!raw || raw.endsWith('/')) continue;
+		try {
+			const url = checkedUrl(new URL(raw, scope).href, scope.href);
+			const displayMatch =
+				/<(?:[\w.-]+:)?displayname\s*>([^<]*)<\/(?:[\w.-]+:)?displayname\s*>/iu.exec(chunk);
+			const name =
+				decodeXmlText(displayMatch?.[1] ?? '').trim() ||
+				decodeSegment(url.pathname.split('/').filter(Boolean).at(-1) ?? '');
+			if (!isWorkspaceFileName(name) || seen.has(url.href)) continue;
+			seen.add(url.href);
+			hrefs.push(url.href);
+		} catch {
+			// Ein Eintrag außerhalb des persönlichen Ordners bleibt unangetastet.
+		}
+	}
+	return hrefs;
 }
 
 async function request(
@@ -385,13 +440,12 @@ export async function connectWebDav(credentials: WebDavCredentials): Promise<Web
 	}
 	const accountFolder = findPersonalCollection(xml, credentials.username);
 	const personal = await findPersonalStorageCollection(credentials, accountFolder);
-	const personalUrl = checkedUrl(personal.href);
-	const workspaceUrl = new URL(WORKSPACE_FILENAME, personalUrl);
+	const personalUrl = folderUrl(personal.href);
 	return {
 		personalHref: personalUrl.href,
 		personalName:
 			personal.name || decodeSegment(personalUrl.pathname.split('/').filter(Boolean).at(-1) ?? ''),
-		workspaceHref: workspaceUrl.href
+		workspaceHref: childFileHref(personalUrl.href, WORKSPACE_FILENAME)
 	};
 }
 
@@ -404,46 +458,14 @@ async function parseRemoteBody(
 	href: string,
 	etag: string | null
 ): Promise<RemoteWorkspace> {
-	if (looksLikeWorkspaceArchive(text)) {
-		const snapshot = await parseWorkspaceArchive(text);
-		if (!snapshot) {
-			throw new WebDavError('Die Workspace-Datei auf wwschool enthält ungültige Daten.');
-		}
-		return {
-			snapshot,
-			hash: await hashWorkspace(snapshot),
-			etag,
-			kind: 'archive',
-			href
-		};
-	}
-	let value: unknown;
-	try {
-		value = JSON.parse(text);
-	} catch {
+	const snapshot = await parseWorkspaceArchive(text);
+	if (!snapshot) {
 		throw new WebDavError('Die Workspace-Datei auf wwschool enthält ungültige Daten.');
 	}
-	if (!value || typeof value !== 'object') {
-		throw new WebDavError('Die Workspace-Datei auf wwschool hat ein unbekanntes Format.');
-	}
-	const payload = value as { application?: unknown; version?: unknown; snapshot?: unknown };
-	if (
-		payload.application !== 'kplus-coder' ||
-		payload.version !== 1 ||
-		!payload.snapshot ||
-		typeof payload.snapshot !== 'object' ||
-		!Array.isArray((payload.snapshot as WorkspaceSnapshot).files)
-	) {
-		throw new WebDavError(
-			'Die Datei gehört nicht zu diesem Editor oder hat ein unbekanntes Format.'
-		);
-	}
-	const snapshot = sanitizeWorkspace(payload.snapshot as WorkspaceSnapshot);
 	return {
 		snapshot,
 		hash: await hashWorkspace(snapshot),
 		etag,
-		kind: 'json',
 		href
 	};
 }
@@ -470,10 +492,7 @@ export async function readWebDavWorkspace(
 	credentials: WebDavCredentials,
 	connection: WebDavConnection
 ): Promise<RemoteWorkspace | null> {
-	return (
-		(await readRemoteAt(credentials, connection.workspaceHref)) ??
-		(await readRemoteAt(credentials, legacyWorkspaceHref(connection)))
-	);
+	return readRemoteAt(credentials, connection.workspaceHref);
 }
 
 async function probeHref(credentials: WebDavCredentials, url: string): Promise<RemoteProbe | null> {
@@ -502,22 +521,7 @@ export async function probeWebDavWorkspace(
 	credentials: WebDavCredentials,
 	connection: WebDavConnection
 ): Promise<RemoteProbe | null> {
-	const primary = await probeHref(credentials, connection.workspaceHref);
-	if (!primary) return null;
-	if (primary.exists) return primary;
-	return probeHref(credentials, legacyWorkspaceHref(connection));
-}
-
-async function moveFile(
-	credentials: WebDavCredentials,
-	source: string,
-	destination: string,
-	overwrite: 'T' | 'F' = 'F'
-): Promise<Response> {
-	return request(credentials, source, 'MOVE', {
-		Destination: destination,
-		Overwrite: overwrite
-	});
+	return probeHref(credentials, connection.workspaceHref);
 }
 
 async function putText(credentials: WebDavCredentials, url: string, text: string): Promise<void> {
@@ -530,8 +534,31 @@ async function deleteQuietly(credentials: WebDavCredentials, url: string): Promi
 	try {
 		await request(credentials, url, 'DELETE');
 	} catch {
-		// Eine hängengebliebene Zwischendatei stört den nächsten Abgleich nicht.
+		// Ohne die alte Datei legt PUT denselben Namen neu an.
 	}
+}
+
+async function deleteExistingWorkspace(
+	credentials: WebDavCredentials,
+	connection: WebDavConnection
+): Promise<void> {
+	const hrefs = new Set<string>([connection.workspaceHref]);
+	try {
+		const response = await request(credentials, connection.personalHref, 'PROPFIND', {
+			Depth: '1'
+		});
+		if (response.status === 207) {
+			for (const href of workspaceHrefsFromPropfind(
+				await response.text(),
+				connection.personalHref
+			)) {
+				hrefs.add(href);
+			}
+		}
+	} catch {
+		// Ohne Ordnerliste wird nur die bekannte Workspace-Adresse gelöscht.
+	}
+	for (const href of hrefs) await deleteQuietly(credentials, href);
 }
 
 export async function writeWebDavWorkspace(
@@ -547,27 +574,9 @@ export async function writeWebDavWorkspace(
 		throw new WebDavError('Die Workspace-Datei ist größer als 20 MB und wurde nicht übertragen.');
 	}
 	const nextHash = await hashWorkspace(snapshot);
-	if (current?.hash === nextHash && current.kind === 'archive') return current;
-	const personalUrl = checkedUrl(connection.personalHref);
-	const stageUrl = new URL(`${STAGE_PREFIX}${crypto.randomUUID()}.py`, personalUrl).href;
-	let staged = false;
-	try {
-		await putText(credentials, stageUrl, text);
-		staged = true;
-		const overwrite = current ? 'T' : 'F';
-		const committed = await moveFile(credentials, stageUrl, connection.workspaceHref, overwrite);
-		if (!committed.ok) {
-			throw new WebDavConflictError(await readWebDavWorkspace(credentials, connection));
-		}
-		staged = false;
-	} finally {
-		if (staged) await deleteQuietly(credentials, stageUrl);
-	}
-
-	if (current?.kind === 'json') {
-		await deleteQuietly(credentials, legacyWorkspaceHref(connection));
-	}
-
+	if (current?.hash === nextHash) return current;
+	await deleteExistingWorkspace(credentials, connection);
+	await putText(credentials, connection.workspaceHref, text);
 	const verified = await readRemoteAt(credentials, connection.workspaceHref);
 	if (!verified || verified.hash !== nextHash) {
 		throw new WebDavConflictError(

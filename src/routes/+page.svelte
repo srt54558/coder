@@ -636,11 +636,7 @@
 
 		if (remote) {
 			if (localHash === remote.hash) {
-				const uploaded =
-					remote.kind === 'json'
-						? await writeWebDavWorkspace(credentials, connection, local, remote.hash)
-						: remote;
-				const state = nextSyncState(connection, uploaded.hash, uploaded.etag);
+				const state = nextSyncState(connection, remote.hash, remote.etag);
 				await saveWebDavSyncState(state);
 				webdavSyncState = state;
 				syncStatus = 'synced';
@@ -1055,7 +1051,12 @@
 
 	function saveShared(folderId: string) {
 		if (sharedCode === null) return;
-		const next = importFiles(workspace, folderId, [{ name: 'geteilt.py', content: sharedCode }]);
+		const existing = workspace.files.find(
+			(file) => file.folderId === folderId && file.name.toLocaleLowerCase('de') === 'geteilt.py'
+		);
+		const next = existing
+			? openFile(updateFileContent(workspace, existing.id, sharedCode), existing.id)
+			: importFiles(workspace, folderId, [{ name: 'geteilt.py', content: sharedCode }]);
 		sharedCode = null;
 		viewingShare = false;
 		saveChooser = false;

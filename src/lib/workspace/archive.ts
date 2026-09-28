@@ -1,6 +1,6 @@
 import { sanitizeWorkspace, type WorkspaceSnapshot } from './model';
 
-export const WORKSPACE_ARCHIVE_NAME = 'python-workspace.py';
+export const WORKSPACE_ARCHIVE_NAME = 'coder-workspace.py';
 
 const BEGIN = '# BEGIN KPLUS_WORKSPACE_V1';
 const END = '# END KPLUS_WORKSPACE_V1';

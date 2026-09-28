@@ -10,8 +10,8 @@ Die Seite ist eine statische Website. Cloudflare liefert nur Dateien aus und fü
 - Python im Browser ausführen und mit Ruff prüfen
 - HTML, CSS und JavaScript prüfen, auch Skript und Stil in einer HTML-Datei
 - Dateien und Ordner anlegen; ohne Anmeldung bleiben sie in IndexedDB in diesem Browser
-- optional mit demselben wwschool-Zugang direkt per WebDAV synchronisieren; der persönliche Ordner wird automatisch erkannt und der Workspace als komprimierte `python-workspace.py` dort abgelegt, im selben Format wie beim Datenbank-Download
-- den gesamten Workspace als `python-workspace.py` herunterladen; der Import ersetzt die Datenbank nach einer Rückfrage
+- optional mit demselben wwschool-Zugang direkt per WebDAV synchronisieren; der persönliche Ordner wird automatisch erkannt und der Workspace als komprimierte `coder-workspace.py` dort abgelegt, im selben Format wie beim Datenbank-Download
+- den gesamten Workspace als `coder-workspace.py` herunterladen; der Import ersetzt die Datenbank nach einer Rückfrage
 - einen Dateiinhalt als Link teilen; ein geöffneter geteilter Stand bleibt ungespeichert, bis du einen Ordner wählst
 - vor dem Schließen warnen, solange eine Änderung noch nicht gespeichert ist
 

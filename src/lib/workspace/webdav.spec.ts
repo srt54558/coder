@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { workspaceExport } from './archive';
+import { WORKSPACE_ARCHIVE_NAME, workspaceExport } from './archive';
 import { createInitialWorkspace } from './model';
 import {
 	WebDavConflictError,
@@ -14,20 +14,25 @@ const credentials: WebDavCredentials = { username: 'person@example.test', passwo
 const connection: WebDavConnection = {
 	personalHref: 'https://www.wwschool.de/webdav.php/person/',
 	personalName: 'person',
-	workspaceHref: 'https://www.wwschool.de/webdav.php/person/python-workspace.py'
+	workspaceHref: `https://www.wwschool.de/webdav.php/person/${WORKSPACE_ARCHIVE_NAME}`
 };
-const legacyHref = 'https://www.wwschool.de/webdav.php/person/kplus-coder-workspace.json';
 
 afterEach(() => vi.unstubAllGlobals());
+
+function emptyPropfind(): Response {
+	return new Response(
+		`<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:"></D:multistatus>`,
+		{ status: 207 }
+	);
+}
 
 describe('wwschool workspace sync', () => {
 	it('recognizes the untouched starter workspace after the welcome screen', () => {
 		expect(isEmptyWorkspace({ ...createInitialWorkspace(), welcomed: true })).toBe(true);
 	});
 
-	it('creates a missing workspace as a compressed python archive', async () => {
+	it('creates a missing workspace as coder-workspace.py', async () => {
 		const calls: { method: string; url: string; headers: Headers; body: string }[] = [];
-		let stagedText = '';
 		let workspaceText = '';
 		vi.stubGlobal(
 			'fetch',
@@ -37,20 +42,17 @@ describe('wwschool workspace sync', () => {
 				const headers = new Headers(init?.headers);
 				const body = typeof init?.body === 'string' ? init.body : '';
 				calls.push({ method, url, headers, body });
-				if (method === 'GET' && !workspaceText) {
-					return new Response(null, { status: 404 });
+				if (method === 'GET' && url === connection.workspaceHref && workspaceText) {
+					return new Response(workspaceText, { status: 200 });
 				}
-				if (method === 'PUT') {
-					stagedText = body;
-					return new Response(null, { status: 201 });
-				}
-				if (method === 'MOVE') {
-					workspaceText = stagedText;
-					return new Response(null, { status: 201 });
-				}
-				if (method === 'GET') return new Response(workspaceText, { status: 200 });
+				if (method === 'GET') return new Response(null, { status: 404 });
+				if (method === 'PROPFIND') return emptyPropfind();
 				if (method === 'DELETE') return new Response(null, { status: 404 });
-				throw new Error(`Unexpected WebDAV method: ${method}`);
+				if (method === 'PUT' && url === connection.workspaceHref) {
+					workspaceText = body;
+					return new Response(null, { status: 201 });
+				}
+				throw new Error(`Unexpected WebDAV ${method} ${url}`);
 			})
 		);
 
@@ -58,14 +60,15 @@ describe('wwschool workspace sync', () => {
 		const result = await writeWebDavWorkspace(credentials, connection, snapshot, null);
 
 		expect(result.snapshot).toEqual(snapshot);
-		expect(result.kind).toBe('archive');
-		expect(calls.map((call) => call.method)).toEqual(['GET', 'GET', 'PUT', 'MOVE', 'GET']);
-		expect(calls[1]?.url).toBe(legacyHref);
-		expect(calls[2]?.body).toContain('# BEGIN KPLUS_WORKSPACE_V1');
-		expect(calls[2]?.body).toContain('import gzip');
-		expect(calls[2]?.headers.has('Content-Type')).toBe(false);
-		expect(calls[3]?.headers.get('Destination')).toBe(connection.workspaceHref);
-		expect(calls[3]?.headers.get('Overwrite')).toBe('F');
+		expect(calls.find((call) => call.method === 'PUT')?.url).toBe(connection.workspaceHref);
+		expect(calls.find((call) => call.method === 'PUT')?.url.endsWith('/coder-workspace.py')).toBe(
+			true
+		);
+		expect(calls.find((call) => call.method === 'PUT')?.body).toContain(
+			'# BEGIN KPLUS_WORKSPACE_V1'
+		);
+		expect(calls.find((call) => call.method === 'PUT')?.headers.has('Content-Type')).toBe(false);
+		expect(calls.some((call) => call.method === 'MOVE')).toBe(false);
 	});
 
 	it('stops before writing when the remote file differs from the expected base', async () => {
@@ -80,35 +83,51 @@ describe('wwschool workspace sync', () => {
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 
-	it('replaces a synced workspace without leaving a backup file', async () => {
+	it('deletes the previous file and puts the same coder-workspace.py', async () => {
 		const previousSnapshot = createInitialWorkspace('print("alt")');
 		const nextSnapshot = createInitialWorkspace('print("neu")');
 		let workspaceText = await workspaceExport(previousSnapshot);
-		let stagedText = '';
-		const calls: { method: string; url: string; headers: Headers }[] = [];
+		const store = new Map<string, string>([[connection.workspaceHref, workspaceText]]);
+		const putUrls: string[] = [];
+		const deleted: string[] = [];
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const method = init?.method ?? 'GET';
 				const url = String(input);
-				const headers = new Headers(init?.headers);
-				calls.push({ method, url, headers });
 				if (method === 'GET') {
-					if (url === connection.workspaceHref && workspaceText) {
-						return new Response(workspaceText, { status: 200 });
-					}
-					return new Response(null, { status: 404 });
+					const text = store.get(url);
+					return text ? new Response(text, { status: 200 }) : new Response(null, { status: 404 });
+				}
+				if (method === 'PROPFIND') {
+					return new Response(
+						`<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/webdav.php/person/${WORKSPACE_ARCHIVE_NAME}</D:href>
+    <D:propstat>
+      <D:prop><D:resourcetype/><D:displayname>${WORKSPACE_ARCHIVE_NAME}</D:displayname></D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`,
+						{ status: 207 }
+					);
+				}
+				if (method === 'DELETE') {
+					deleted.push(url);
+					store.delete(url);
+					return new Response(null, { status: 204 });
 				}
 				if (method === 'PUT') {
-					stagedText = String(init?.body ?? '');
+					if (store.has(url)) {
+						throw new Error(`PUT created a second file at ${url}`);
+					}
+					putUrls.push(url);
+					store.set(url, String(init?.body ?? ''));
 					return new Response(null, { status: 201 });
 				}
-				if (method === 'MOVE') {
-					workspaceText = stagedText;
-					return new Response(null, { status: 201 });
-				}
-				if (method === 'DELETE') return new Response(null, { status: 204 });
-				throw new Error(`Unexpected WebDAV method: ${method}`);
+				throw new Error(`Unexpected WebDAV ${method} ${url}`);
 			})
 		);
 
@@ -120,67 +139,44 @@ describe('wwschool workspace sync', () => {
 		);
 
 		expect(result.snapshot).toEqual(nextSnapshot);
-		expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
-		expect(calls.filter((call) => call.method === 'MOVE')).toHaveLength(1);
-		expect(calls.find((call) => call.method === 'MOVE')?.headers.get('Destination')).toBe(
-			connection.workspaceHref
-		);
-		expect(calls.find((call) => call.method === 'MOVE')?.headers.get('Overwrite')).toBe('T');
-		expect(calls.some((call) => call.headers.get('Destination')?.includes('backup'))).toBe(false);
+		expect(deleted).toContain(connection.workspaceHref);
+		expect(putUrls).toEqual([connection.workspaceHref]);
+		expect(store.size).toBe(1);
+		expect(store.has(connection.workspaceHref)).toBe(true);
 	});
 
-	it('migrates an old json workspace into the compressed python file', async () => {
-		const snapshot = createInitialWorkspace('print("json")');
-		const jsonText = JSON.stringify({
-			application: 'kplus-coder',
-			version: 1,
-			snapshot
-		});
-		let stagedText = '';
-		let archiveText = '';
-		let jsonExists = true;
-		const calls: { method: string; url: string }[] = [];
+	it('writes later saves to the same workspace url', async () => {
+		const first = createInitialWorkspace('print("eins")');
+		const second = createInitialWorkspace('print("zwei")');
+		const store = new Map<string, string>();
+		const putUrls: string[] = [];
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const method = init?.method ?? 'GET';
 				const url = String(input);
-				calls.push({ method, url });
-				if (method === 'GET' && url === connection.workspaceHref) {
-					return archiveText
-						? new Response(archiveText, { status: 200 })
-						: new Response(null, { status: 404 });
+				if (method === 'GET') {
+					const text = store.get(url);
+					return text ? new Response(text, { status: 200 }) : new Response(null, { status: 404 });
 				}
-				if (method === 'GET' && url === legacyHref) {
-					return jsonExists
-						? new Response(jsonText, { status: 200 })
-						: new Response(null, { status: 404 });
+				if (method === 'PROPFIND') return emptyPropfind();
+				if (method === 'DELETE') {
+					store.delete(url);
+					return new Response(null, { status: 404 });
 				}
 				if (method === 'PUT') {
-					stagedText = String(init?.body ?? '');
+					putUrls.push(url);
+					store.set(url, String(init?.body ?? ''));
 					return new Response(null, { status: 201 });
-				}
-				if (method === 'MOVE') {
-					archiveText = stagedText;
-					return new Response(null, { status: 201 });
-				}
-				if (method === 'DELETE' && url === legacyHref) {
-					jsonExists = false;
-					return new Response(null, { status: 204 });
 				}
 				throw new Error(`Unexpected WebDAV ${method} ${url}`);
 			})
 		);
 
-		const result = await writeWebDavWorkspace(
-			credentials,
-			connection,
-			snapshot,
-			await hashWorkspace(snapshot)
-		);
+		await writeWebDavWorkspace(credentials, connection, first, null);
+		await writeWebDavWorkspace(credentials, connection, second, await hashWorkspace(first));
 
-		expect(result.kind).toBe('archive');
-		expect(jsonExists).toBe(false);
-		expect(calls.some((call) => call.method === 'DELETE' && call.url === legacyHref)).toBe(true);
+		expect(putUrls).toEqual([connection.workspaceHref, connection.workspaceHref]);
+		expect([...store.keys()]).toEqual([connection.workspaceHref]);
 	});
 });
