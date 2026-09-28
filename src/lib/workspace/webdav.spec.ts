@@ -63,6 +63,7 @@ describe('wwschool workspace sync', () => {
 		expect(calls[1]?.url).toBe(legacyHref);
 		expect(calls[2]?.body).toContain('# BEGIN KPLUS_WORKSPACE_V1');
 		expect(calls[2]?.body).toContain('import gzip');
+		expect(calls[2]?.headers.has('Content-Type')).toBe(false);
 		expect(calls[3]?.headers.get('Destination')).toBe(connection.workspaceHref);
 		expect(calls[3]?.headers.get('Overwrite')).toBe('F');
 	});

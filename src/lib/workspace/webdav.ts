@@ -484,13 +484,7 @@ async function probeHref(credentials: WebDavCredentials, url: string): Promise<R
 		throw new WebDavError(friendlyStatus(head.status, 'die Workspace-Datei prüfen'), head.status);
 	}
 
-	const listed = await request(
-		credentials,
-		url,
-		'PROPFIND',
-		{ Depth: '0', 'Content-Type': 'application/xml; charset=utf-8' },
-		PROPFIND_ETAG
-	);
+	const listed = await request(credentials, url, 'PROPFIND', { Depth: '0' }, PROPFIND_ETAG);
 	if (listed.status === 404) return { exists: false, etag: null };
 	if (listed.status !== 207) return null;
 	let xml: Document;
@@ -527,13 +521,7 @@ async function moveFile(
 }
 
 async function putText(credentials: WebDavCredentials, url: string, text: string): Promise<void> {
-	const response = await request(
-		credentials,
-		url,
-		'PUT',
-		{ 'Content-Type': 'text/x-python; charset=utf-8' },
-		text
-	);
+	const response = await request(credentials, url, 'PUT', {}, text);
 	if (!response.ok)
 		throw new WebDavError(friendlyStatus(response.status, 'die Datei speichern'), response.status);
 }
