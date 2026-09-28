@@ -4,10 +4,14 @@
 	import FileDown from '@lucide/svelte/icons/file-down';
 	import FilePlus from '@lucide/svelte/icons/file-plus';
 	import Folder from '@lucide/svelte/icons/folder';
+	import HardDrive from '@lucide/svelte/icons/hard-drive';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Upload from '@lucide/svelte/icons/upload';
+	import Cloud from '@lucide/svelte/icons/cloud';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -45,6 +49,9 @@
 		ondownload,
 		onnotice,
 		onrestore,
+		syncStatus = 'local',
+		syncLocation = '',
+		onresolve,
 		onsave
 	}: {
 		open?: boolean;
@@ -54,6 +61,9 @@
 		ondownload: () => void;
 		onnotice?: (message: string) => void;
 		onrestore?: () => void;
+		syncStatus?: 'local' | 'syncing' | 'synced' | 'conflict' | 'error';
+		syncLocation?: string;
+		onresolve?: () => void;
 		onsave?: (folderId: string) => void;
 	} = $props();
 
@@ -214,7 +224,7 @@
 				continue;
 			}
 			const content = await file.text();
-			const restored = parseWorkspaceArchive(content);
+			const restored = await parseWorkspaceArchive(content);
 			if (restored) {
 				archives.push({ name: file.name, snapshot: restored });
 				continue;
@@ -299,11 +309,25 @@
 				<Dialog.Title>Dateien</Dialog.Title>
 				<Dialog.Description class={onsave ? 'mt-1 text-xs' : 'sr-only'}>
 					{#if onsave}
-						Ordner wählen, dann hier speichern.
+						Ordner wählen, dann hier speichern. Die Datei bleibt sonst ungespeichert.
 					{:else}
 						Dateien und Ordner.
 					{/if}
 				</Dialog.Description>
+			</div>
+			<div class="sync-state" data-state={syncStatus} aria-live="polite" title={syncLocation}>
+				{#if syncStatus === 'syncing'}
+					<LoaderCircle class="sync-spinner" /><span>Wird synchronisiert …</span>
+				{:else if syncStatus === 'synced'}
+					<Cloud /><span>wwschool</span>
+				{:else if syncStatus === 'conflict'}
+					<TriangleAlert /><span>Abgleich nötig</span>
+					{#if onresolve}<Button variant="outline" size="xs" onclick={onresolve}>Lösen</Button>{/if}
+				{:else if syncStatus === 'error'}
+					<TriangleAlert /><span>Verbindung gestört</span>
+				{:else}
+					<HardDrive /><span>Nur lokal</span>
+				{/if}
 			</div>
 			<div class="header-actions">
 				<input
@@ -545,7 +569,10 @@
 		align-items: center;
 	}
 	.explorer-header {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
 		justify-content: space-between;
+		align-items: center;
 		gap: 1rem;
 		padding: 1rem 3.2rem 0.9rem 1rem;
 	}
@@ -553,6 +580,36 @@
 		flex-wrap: wrap;
 		justify-content: flex-end;
 		gap: 0.4rem;
+	}
+	.sync-state {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.35rem;
+		min-width: 0;
+		color: var(--muted-foreground);
+		font-size: 0.72rem;
+		white-space: nowrap;
+	}
+	.sync-state[data-state='synced'] {
+		color: var(--muted-foreground);
+	}
+	.sync-state[data-state='conflict'],
+	.sync-state[data-state='error'] {
+		color: var(--destructive);
+	}
+	.sync-state :global(svg) {
+		width: 0.9rem;
+		height: 0.9rem;
+		flex: 0 0 auto;
+	}
+	.sync-state :global(.sync-spinner) {
+		animation: sync-spin 1s linear infinite;
+	}
+	@keyframes sync-spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 	.file-input {
 		display: none;
@@ -566,9 +623,12 @@
 	}
 	@media (max-width: 899px) {
 		.explorer-header {
-			flex-direction: column;
-			align-items: stretch;
+			grid-template-columns: 1fr;
+			align-items: start;
 			padding-right: 2.6rem;
+		}
+		.sync-state {
+			justify-content: flex-start;
 		}
 		.header-actions {
 			justify-content: flex-start;

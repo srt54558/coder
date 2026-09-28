@@ -40,20 +40,33 @@ function sampleWorkspace() {
 }
 
 describe('workspace archive', () => {
-	it('round-trips the workspace through an encoded python file', () => {
+	it('round-trips the workspace through a compressed python file', async () => {
 		const snapshot = sampleWorkspace();
-		const exported = workspaceExport(snapshot);
+		const exported = await workspaceExport(snapshot);
 		expect(exported.startsWith('#!/usr/bin/env python3\n')).toBe(true);
-		expect(parseWorkspaceArchive(exported)).toEqual(snapshot);
-		expect(parseWorkspaceArchive('print("hi")\n')).toBeNull();
-		expect(parseWorkspaceArchive(exported.replaceAll('# END KPLUS_WORKSPACE_V1', '# END OTHER'))).toBeNull();
+		expect(exported).toContain('import gzip');
+		expect(await parseWorkspaceArchive(exported)).toEqual(snapshot);
+		expect(await parseWorkspaceArchive('print("hi")\n')).toBeNull();
+		expect(
+			await parseWorkspaceArchive(exported.replaceAll('# END KPLUS_WORKSPACE_V1', '# END OTHER'))
+		).toBeNull();
 	});
 
-	it.skipIf(!hasPython)('writes the project beside the script only after y', () => {
+	it('still reads an uncompressed archive from an older download', async () => {
+		const snapshot = createInitialWorkspace('print("alt")');
+		const encoded = Buffer.from(
+			JSON.stringify({ application: 'python.k-plus.one', workspace: snapshot }),
+			'utf8'
+		).toString('base64');
+		const source = `# BEGIN KPLUS_WORKSPACE_V1\n# ${encoded}\n# END KPLUS_WORKSPACE_V1\n`;
+		expect(await parseWorkspaceArchive(source)).toEqual(snapshot);
+	});
+
+	it.skipIf(!hasPython)('writes the project beside the script only after y', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'kplus-archive-'));
 		try {
 			const script = join(root, WORKSPACE_ARCHIVE_NAME);
-			writeFileSync(script, workspaceExport(sampleWorkspace()));
+			writeFileSync(script, await workspaceExport(sampleWorkspace()));
 			writeFileSync(join(root, 'keep.txt'), 'bleiben');
 			const compiled = spawnSync('python3', ['-m', 'py_compile', script], { encoding: 'utf8' });
 			expect(compiled.status, compiled.stderr).toBe(0);

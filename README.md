@@ -9,9 +9,10 @@ Die Seite ist eine statische Website. Cloudflare liefert nur Dateien aus und fü
 - Python, HTML, CSS, JavaScript, JSON, XML, Markdown und Text schreiben
 - Python im Browser ausführen und mit Ruff prüfen
 - HTML, CSS und JavaScript prüfen, auch Skript und Stil in einer HTML-Datei
-- Dateien und Ordner anlegen; sie bleiben in IndexedDB in diesem Browser
+- Dateien und Ordner anlegen; ohne Anmeldung bleiben sie in IndexedDB in diesem Browser
+- optional mit demselben wwschool-Zugang direkt per WebDAV synchronisieren; der persönliche Ordner wird automatisch erkannt und der Workspace als komprimierte `python-workspace.py` dort abgelegt, im selben Format wie beim Datenbank-Download
 - den gesamten Workspace als `python-workspace.py` herunterladen; der Import ersetzt die Datenbank nach einer Rückfrage
-- einen Dateiinhalt als Link teilen
+- einen Dateiinhalt als Link teilen; ein geöffneter geteilter Stand bleibt ungespeichert, bis du einen Ordner wählst
 - vor dem Schließen warnen, solange eine Änderung noch nicht gespeichert ist
 
 `Cmd/Strg + Enter` führt den Code aus. `Cmd/Strg + S` lädt die geöffnete Datei herunter.
@@ -24,7 +25,9 @@ Ein eigenes Worker-Skript würde Anfragen abrechenbar machen. Deshalb bleibt die
 
 `python.k-plus.one` zeigt die Seite nicht mehr. `redirect/` ist ein eigener Worker, der dort nur mit 301 auf dieselbe Adresse unter `coder.k-plus.one` antwortet. Die Seite selbst bleibt ohne Worker-Skript.
 
-Die Python-Laufzeit (Pyodide 314.0.7, inklusive Standardbibliothek) liegt unter `/pyodide/` und wird mit der Seite ausgeliefert. Ruff ebenfalls. Beides ist ein Abruf derselben Website, kein Aufruf eines Cloudflare-Workers. Python-Code und Dateien werden nicht an einen Anwendungsserver gesendet.
+Die Python-Laufzeit (Pyodide 314.0.7, inklusive Standardbibliothek) liegt unter `/pyodide/` und wird mit der Seite ausgeliefert. Ruff ebenfalls. Beides ist ein Abruf derselben Website, kein Aufruf eines Cloudflare-Workers. Python-Code wird im Browser ausgeführt. Bei aktivierter wwschool-Synchronisierung sendet der Browser den Workspace direkt über HTTPS per WebDAV an wwschool; die Zugangsdaten werden bei „Angemeldet bleiben“ verschlüsselt im lokalen IndexedDB-Speicher gehalten, sonst nur für die aktuelle Sitzung.
+
+Beim Verbinden vergleicht die Seite lokale und entfernte Stände. Wenn beide seit der letzten Synchronisierung geändert wurden oder sich der Serverstand während eines Speicherns ändert, wird nichts still überschrieben: Die Seite hält an und bietet eine bewusste Auswahl an. Der Abgleich prüft den Serverstand in kurzen Abständen erneut, solange der Tab sichtbar ist.
 
 Im Browser fehlen normale Prozesse und native Threads. Ein Lauf endet nach 15 Sekunden oder beim Stopp; der Python-Worker wird danach neu aufgebaut.
 

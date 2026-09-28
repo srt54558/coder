@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { encodeCode, IMPORT_PARAM } from '../src/lib/runner/share';
 
 const LABELS: Record<string, string> = {
 	py: 'Python-Code',
@@ -489,4 +490,63 @@ test('opens the matching docs section from a hover link', async ({ page }) => {
 	await expect(
 		docs.getByRole('heading', { name: 'Überschrift und Text', exact: true })
 	).toBeVisible();
+});
+
+test('asks for wwschool login from files, then stays local for this session', async ({ page }) => {
+	await openCoder(page);
+	await page.getByRole('button', { name: 'Dateien' }).click();
+
+	const login = page.getByRole('dialog', { name: 'Bei wwschool anmelden' });
+	await expect(login).toBeVisible();
+	await expect(
+		login.getByText('Dein Workspace bleibt lokal gespeichert und wird mit wwschool abgeglichen.')
+	).toBeVisible();
+	await expect(login.getByLabel('E-Mail-Adresse')).toHaveValue('kri.avramovic@stg-segeberg.de');
+	const password = login.getByLabel('Passwort');
+	await expect(password).toHaveAttribute('type', 'password');
+	await password.fill('feldtest');
+	await expect(password).toHaveValue('feldtest');
+	await expect(login.getByLabel('Angemeldet bleiben')).toBeChecked();
+	await expect(login.getByRole('button', { name: 'Anmelden', exact: true })).toBeVisible();
+	await login.getByRole('button', { name: 'Lokal weiterarbeiten' }).click();
+
+	const files = page.getByRole('dialog', { name: 'Dateien' });
+	await expect(login).toBeHidden();
+	await expect(files).toBeVisible();
+	await expect(files.getByText('Nur lokal', { exact: true })).toBeVisible();
+	await expect(files.getByRole('button', { name: 'Mit wwschool verbinden' })).toHaveCount(0);
+	await expect(files.getByRole('button', { name: 'Lokal', exact: true })).toHaveCount(0);
+	await page.keyboard.press('Escape');
+	await expect(files).toBeHidden();
+
+	await page.getByRole('button', { name: 'Dateien' }).click();
+	await expect(login).toBeHidden();
+	await expect(files).toBeVisible();
+	await page.keyboard.press('Escape');
+
+	await page.getByRole('button', { name: 'Einstellungen' }).click();
+	await page.getByRole('button', { name: 'Bei wwschool anmelden' }).click();
+	await expect(login).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(login).toBeHidden();
+});
+
+test('opens shared code unsaved and saves it through the files manager', async ({ page }) => {
+	await openCoder(page);
+	await page.goto(`/?${IMPORT_PARAM}#${encodeCode('print("geteilt")')}`);
+	await expect(page.getByRole('tab', { name: /geteilt\.py/u })).toBeVisible();
+	await expect(page.getByText('Nicht gespeichert', { exact: true })).toBeVisible();
+	await expect(page.locator('.cm-content')).toContainText('print("geteilt")');
+	await page.getByRole('button', { name: 'Geteilte Datei speichern' }).click();
+	const login = page.getByRole('dialog', { name: 'Bei wwschool anmelden' });
+	await expect(login).toBeVisible();
+	await login.getByRole('button', { name: 'Lokal weiterarbeiten' }).click();
+	const files = page.getByRole('dialog', { name: 'Dateien' });
+	await expect(files).toBeVisible();
+	await expect(files.getByText('Ordner wählen, dann hier speichern.')).toBeVisible();
+	await files.getByRole('button', { name: 'Hier speichern' }).click();
+	await expect(files).toBeHidden();
+	await expect(page.getByRole('tab', { name: 'geteilt.py', exact: true })).toBeVisible();
+	await expect(page.getByText('Nicht gespeichert', { exact: true })).toHaveCount(0);
+	await expect(page.locator('.cm-content')).toContainText('print("geteilt")');
 });

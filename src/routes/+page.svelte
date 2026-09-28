@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
+	import { SvelteURL } from 'svelte/reactivity';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -10,6 +11,8 @@
 	import Flower2 from '@lucide/svelte/icons/flower-2';
 	import Info from '@lucide/svelte/icons/info';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import LogIn from '@lucide/svelte/icons/log-in';
+	import LogOut from '@lucide/svelte/icons/log-out';
 	import Moon from '@lucide/svelte/icons/moon';
 	import Play from '@lucide/svelte/icons/play';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -34,6 +37,7 @@
 	import * as Popover from '$lib/components/ui/popover/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Label } from '$lib/components/ui/label/index.js';
 	import * as ButtonGroup from '$lib/components/ui/button-group/index.js';
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import type { RuffDiagnostic, RuffWorkerMessage, RunnerStatus } from '$lib/runner/protocol';
@@ -62,6 +66,26 @@
 	import { WORKSPACE_ARCHIVE_NAME, workspaceExport } from '$lib/workspace/archive';
 	import { loadWorkspace, saveWorkspace, writeWorkspaceBackup } from '$lib/workspace/database';
 	import {
+		clearWebDavCredentials,
+		connectWebDav,
+		hashWorkspace,
+		hasSessionWebDavCredentials,
+		isEmptyWorkspace,
+		loadWebDavCredentials,
+		loadWebDavSyncState,
+		probeWebDavWorkspace,
+		readWebDavWorkspace,
+		rememberWebDavCredentials,
+		saveWebDavSyncState,
+		WebDavConflictError,
+		WebDavError,
+		writeWebDavWorkspace,
+		type RemoteWorkspace,
+		type WebDavConnection,
+		type WebDavCredentials,
+		type WebDavSyncState
+	} from '$lib/workspace/webdav';
+	import {
 		closeFile,
 		structureSignature,
 		applyWelcomeChoice,
@@ -88,6 +112,10 @@
 
 	const RUN_TIMEOUT_MS = 15_000;
 	const SAVE_DELAY_MS = 250;
+	const REMOTE_SYNC_DELAY_MS = 400;
+	const REMOTE_POLL_MS = 2_500;
+	const DEFAULT_WEBDAV_USERNAME = 'kri.avramovic@stg-segeberg.de';
+	const LOCAL_ONLY_KEY = 'kplus-coder-local-only';
 	const SHARED_PREVIEW_ID = 'shared-preview';
 
 	let workspace = $state(createInitialWorkspace());
@@ -129,6 +157,32 @@
 	let theme = $state<AppTheme>('light');
 	let clearOpen = $state(false);
 	let filesOpen = $state(false);
+	type SyncStatus = 'local' | 'connecting' | 'syncing' | 'synced' | 'conflict' | 'error';
+	type SyncConflict = {
+		local: WorkspaceSnapshot;
+		remote: RemoteWorkspace | null;
+		connection: WebDavConnection;
+		message: string;
+	};
+	let syncStatus = $state<SyncStatus>('local');
+	let syncError = $state('');
+	let webdavCredentials = $state<WebDavCredentials | null>(null);
+	let webdavConnection = $state<WebDavConnection | null>(null);
+	let webdavSyncState = $state<WebDavSyncState | null>(null);
+	let syncConflict = $state<SyncConflict | null>(null);
+	let conflictOpen = $state(false);
+	let filesAfterConflict = false;
+	let filesAfterLogin = false;
+	let loginOpen = $state(false);
+	let loginUsername = $state(DEFAULT_WEBDAV_USERNAME);
+	let loginPassword = $state('');
+	let loginStay = $state(true);
+	let loginBusy = $state(false);
+	let loginError = $state('');
+	let webdavRemembered = $state(false);
+	let remoteSyncTimer: ReturnType<typeof setTimeout> | undefined;
+	let remotePollTimer: ReturnType<typeof setInterval> | undefined;
+	let remoteSyncQueue: Promise<void> = Promise.resolve();
 	let explorerToken = $state(0);
 	let sharedCode = $state<string | null>(null);
 	let viewingShare = $state(false);
@@ -219,6 +273,14 @@
 
 	function commitConsole(blocks: ConsoleBlock[]) {
 		consoleBlocks = clipBlocks(blocks);
+	}
+
+	function clearSharedImportUrl() {
+		const url = new SvelteURL(window.location.href);
+		if (!url.searchParams.has(IMPORT_PARAM) && !url.hash) return;
+		url.searchParams.delete(IMPORT_PARAM);
+		url.hash = '';
+		history.replaceState(null, '', `${url.pathname}${url.search}`);
 	}
 
 	function announce(message: string) {
@@ -336,6 +398,7 @@
 				if (ticket !== saveTicket) return true;
 				markSaved(snapshot);
 				saveErrorAnnounced = false;
+				queueRemoteSync(snapshot);
 				return true;
 			} catch {
 				if (ticket === saveTicket && !saveErrorAnnounced) {
@@ -361,6 +424,435 @@
 		void enqueueSave(snapshot, ticket, savedAt);
 	}
 
+	function enqueueRemote(task: () => Promise<void>) {
+		remoteSyncQueue = remoteSyncQueue.then(task, task);
+	}
+
+	function queueRemoteSync(snapshot: WorkspaceSnapshot) {
+		if (
+			!webdavCredentials ||
+			!webdavConnection ||
+			!webdavSyncState ||
+			(syncStatus !== 'synced' && syncStatus !== 'syncing')
+		) {
+			return;
+		}
+		if (remoteSyncTimer) clearTimeout(remoteSyncTimer);
+		const copy = structuredClone(snapshot);
+		remoteSyncTimer = setTimeout(() => {
+			enqueueRemote(() => syncRemoteSnapshot(copy));
+		}, REMOTE_SYNC_DELAY_MS);
+	}
+
+	function queueRemotePull() {
+		if (!webdavCredentials || !webdavConnection || syncStatus !== 'synced') return;
+		enqueueRemote(() => pullRemoteWorkspace());
+	}
+
+	function stopRemoteWatch() {
+		if (remotePollTimer) {
+			clearInterval(remotePollTimer);
+			remotePollTimer = undefined;
+		}
+	}
+
+	function startRemoteWatch() {
+		stopRemoteWatch();
+		remotePollTimer = setInterval(() => {
+			if (document.visibilityState !== 'visible') return;
+			queueRemotePull();
+		}, REMOTE_POLL_MS);
+	}
+
+	function nextSyncState(
+		connection: WebDavConnection,
+		hash: string,
+		etag?: string | null
+	): WebDavSyncState {
+		return {
+			...connection,
+			lastSyncedHash: hash,
+			lastSyncedEtag: etag || undefined
+		};
+	}
+
+	async function syncRemoteSnapshot(snapshot: WorkspaceSnapshot) {
+		const credentials = webdavCredentials;
+		const connection = webdavConnection;
+		const previous = webdavSyncState;
+		if (!credentials || !connection || !previous || syncStatus === 'conflict') return;
+		syncStatus = 'syncing';
+		try {
+			const remote = await writeWebDavWorkspace(
+				credentials,
+				connection,
+				snapshot,
+				previous.lastSyncedHash
+			);
+			const nextState = nextSyncState(connection, remote.hash, remote.etag);
+			await saveWebDavSyncState(nextState);
+			webdavSyncState = nextState;
+			syncError = '';
+			syncStatus = 'synced';
+		} catch (error) {
+			if (error instanceof WebDavConflictError) {
+				const local = $state.snapshot(workspace) as WorkspaceSnapshot;
+				syncConflict = {
+					local,
+					remote: error.remote,
+					connection,
+					message: error.message
+				};
+				syncStatus = 'conflict';
+				conflictOpen = true;
+				return;
+			}
+			syncError =
+				error instanceof Error ? error.message : 'Die Synchronisierung ist fehlgeschlagen.';
+			syncStatus = 'error';
+			announce(syncError);
+		}
+	}
+
+	async function pullRemoteWorkspace() {
+		const credentials = webdavCredentials;
+		const connection = webdavConnection;
+		const previous = webdavSyncState;
+		if (!credentials || !connection || !previous || syncStatus !== 'synced') return;
+		try {
+			if (previous.lastSyncedEtag) {
+				try {
+					const probe = await probeWebDavWorkspace(credentials, connection);
+					if (probe?.exists && probe.etag === previous.lastSyncedEtag) return;
+				} catch {
+					// Ohne ETag wird der volle Stand gelesen.
+				}
+			}
+			const remote = await readWebDavWorkspace(credentials, connection);
+			if (syncStatus !== 'synced') return;
+			const local = $state.snapshot(workspace) as WorkspaceSnapshot;
+			const localHash = await hashWorkspace(local);
+			if (!remote) {
+				showSyncConflict(
+					local,
+					null,
+					connection,
+					'Die zuvor synchronisierte Workspace-Datei fehlt auf wwschool. Der lokale Stand bleibt erhalten.',
+					false
+				);
+				return;
+			}
+			if (remote.hash === previous.lastSyncedHash) {
+				if (remote.etag && remote.etag !== previous.lastSyncedEtag) {
+					const nextState = nextSyncState(connection, remote.hash, remote.etag);
+					await saveWebDavSyncState(nextState);
+					webdavSyncState = nextState;
+				}
+				return;
+			}
+			if (localHash === previous.lastSyncedHash) {
+				await adoptRemoteWorkspace(remote, connection);
+				return;
+			}
+			if (localHash === remote.hash) {
+				const nextState = nextSyncState(connection, remote.hash, remote.etag);
+				await saveWebDavSyncState(nextState);
+				webdavSyncState = nextState;
+				return;
+			}
+			showSyncConflict(
+				local,
+				remote,
+				connection,
+				'Lokal und auf wwschool liegen unterschiedliche Versionen.',
+				false
+			);
+		} catch (error) {
+			if (syncStatus !== 'synced') return;
+			syncError =
+				error instanceof Error ? error.message : 'Die Synchronisierung ist fehlgeschlagen.';
+			syncStatus = 'error';
+			announce(syncError);
+		}
+	}
+
+	async function persistWorkspaceNow(snapshot: WorkspaceSnapshot) {
+		if (saveTimer) clearTimeout(saveTimer);
+		const ticket = ++saveTicket;
+		const savedAt = writeWorkspaceBackup(snapshot);
+		if (!(await enqueueSave(snapshot, ticket, savedAt))) {
+			throw new WebDavError('Die lokale Workspace konnte nicht gespeichert werden.');
+		}
+	}
+
+	async function adoptRemoteWorkspace(remote: RemoteWorkspace, connection: WebDavConnection) {
+		syncStatus = 'connecting';
+		const nextState = nextSyncState(connection, remote.hash, remote.etag);
+		await saveWebDavSyncState(nextState);
+		webdavSyncState = nextState;
+		await persistWorkspaceNow(remote.snapshot);
+		workspace = remote.snapshot;
+		markSaved(remote.snapshot);
+		syncStatus = 'synced';
+		syncError = '';
+	}
+
+	function showSyncConflict(
+		local: WorkspaceSnapshot,
+		remote: RemoteWorkspace | null,
+		connection: WebDavConnection,
+		message: string,
+		openFiles: boolean
+	) {
+		syncConflict = { local: structuredClone(local), remote, connection, message };
+		filesAfterConflict = openFiles;
+		syncStatus = 'conflict';
+		conflictOpen = true;
+		loginOpen = false;
+	}
+
+	async function startWebDavSession(
+		credentials: WebDavCredentials,
+		options: { store: 'persistent' | 'session' | 'keep' }
+	) {
+		syncStatus = 'connecting';
+		syncError = '';
+		loginUsername = credentials.username;
+		const connection = await connectWebDav(credentials);
+		if (options.store === 'persistent' || options.store === 'session') {
+			await rememberWebDavCredentials(credentials, options.store === 'persistent');
+			webdavRemembered = options.store === 'persistent';
+		}
+		webdavCredentials = credentials;
+		webdavConnection = connection;
+		const [remote, storedState] = await Promise.all([
+			readWebDavWorkspace(credentials, connection),
+			loadWebDavSyncState()
+		]);
+		const previous = storedState?.workspaceHref === connection.workspaceHref ? storedState : null;
+		webdavSyncState = previous;
+		const local = $state.snapshot(workspace) as WorkspaceSnapshot;
+		const localHash = await hashWorkspace(local);
+
+		if (remote) {
+			if (localHash === remote.hash) {
+				const uploaded =
+					remote.kind === 'json'
+						? await writeWebDavWorkspace(credentials, connection, local, remote.hash)
+						: remote;
+				const state = nextSyncState(connection, uploaded.hash, uploaded.etag);
+				await saveWebDavSyncState(state);
+				webdavSyncState = state;
+				syncStatus = 'synced';
+			} else if (previous && localHash === previous.lastSyncedHash) {
+				await adoptRemoteWorkspace(remote, connection);
+			} else if (previous && remote.hash === previous.lastSyncedHash) {
+				const uploaded = await writeWebDavWorkspace(credentials, connection, local, remote.hash);
+				const state = nextSyncState(connection, uploaded.hash, uploaded.etag);
+				await saveWebDavSyncState(state);
+				webdavSyncState = state;
+				syncStatus = 'synced';
+			} else if (!previous && isEmptyWorkspace(local)) {
+				await adoptRemoteWorkspace(remote, connection);
+			} else {
+				showSyncConflict(
+					local,
+					remote,
+					connection,
+					'Lokal und auf wwschool liegen unterschiedliche Versionen.',
+					false
+				);
+				return;
+			}
+		} else if (previous) {
+			showSyncConflict(
+				local,
+				null,
+				connection,
+				'Die zuvor synchronisierte Workspace-Datei fehlt auf wwschool. Der lokale Stand bleibt erhalten.',
+				false
+			);
+			return;
+		} else {
+			const uploaded = await writeWebDavWorkspace(credentials, connection, local, null);
+			const state = nextSyncState(connection, uploaded.hash, uploaded.etag);
+			await saveWebDavSyncState(state);
+			webdavSyncState = state;
+			syncStatus = 'synced';
+		}
+
+		writeLocalOnly(false);
+		if (filesAfterLogin) {
+			showFilesManager();
+			filesAfterLogin = false;
+		}
+		loginOpen = false;
+		loginPassword = '';
+	}
+
+	function readLocalOnly(): boolean {
+		try {
+			return sessionStorage.getItem(LOCAL_ONLY_KEY) === 'true';
+		} catch {
+			return false;
+		}
+	}
+
+	function writeLocalOnly(value: boolean) {
+		try {
+			if (value) sessionStorage.setItem(LOCAL_ONLY_KEY, 'true');
+			else sessionStorage.removeItem(LOCAL_ONLY_KEY);
+		} catch {
+			// Ohne Sitzungsspeicher bleibt die lokale Entscheidung nur im Speicher.
+		}
+	}
+
+	function continueLocally() {
+		writeLocalOnly(true);
+		loginPassword = '';
+		loginError = '';
+		if (filesAfterLogin) showFilesManager();
+		filesAfterLogin = false;
+		loginOpen = false;
+	}
+
+	async function submitWebDavLogin(event: SubmitEvent) {
+		event.preventDefault();
+		if (loginBusy) return;
+		const credentials = { username: loginUsername.trim(), password: loginPassword };
+		if (!credentials.username || !credentials.password) {
+			loginError = 'Gib deine wwschool-E-Mail-Adresse und dein Passwort ein.';
+			return;
+		}
+		loginBusy = true;
+		loginError = '';
+		try {
+			await startWebDavSession(credentials, {
+				store: loginStay ? 'persistent' : 'session'
+			});
+			announce(
+				loginStay
+					? 'Mit wwschool verbunden'
+					: 'Mit wwschool verbunden. Die Anmeldung gilt nur für diese Sitzung.'
+			);
+		} catch (error) {
+			loginError = error instanceof Error ? error.message : 'Die Anmeldung ist fehlgeschlagen.';
+			syncStatus = 'error';
+		} finally {
+			loginPassword = '';
+			loginBusy = false;
+		}
+	}
+
+	function openLogin() {
+		settingsOpen = false;
+		filesAfterLogin = false;
+		loginError = syncError;
+		loginOpen = true;
+	}
+
+	async function logoutWebDav() {
+		settingsOpen = false;
+		stopRemoteWatch();
+		if (remoteSyncTimer) clearTimeout(remoteSyncTimer);
+		await clearWebDavCredentials();
+		webdavCredentials = null;
+		webdavConnection = null;
+		webdavRemembered = false;
+		syncConflict = null;
+		conflictOpen = false;
+		syncStatus = 'local';
+		syncError = '';
+		loginOpen = false;
+		loginPassword = '';
+		announce('Von wwschool abgemeldet');
+	}
+
+	async function reconnectWebDav() {
+		if (loginBusy || !webdavCredentials) return;
+		loginBusy = true;
+		loginError = '';
+		try {
+			await startWebDavSession(webdavCredentials, { store: 'keep' });
+		} catch (error) {
+			loginError = error instanceof Error ? error.message : 'Die Anmeldung ist fehlgeschlagen.';
+			syncError = loginError;
+			syncStatus = 'error';
+			announce(syncError);
+		} finally {
+			loginBusy = false;
+		}
+	}
+
+	async function useRemoteVersion() {
+		const conflict = syncConflict;
+		const credentials = webdavCredentials;
+		if (!conflict || !credentials) return;
+		try {
+			const current = await readWebDavWorkspace(credentials, conflict.connection);
+			if (!current) {
+				throw new WebDavError('Die Workspace-Datei ist auf wwschool nicht mehr vorhanden.');
+			}
+			if (current.hash !== conflict.remote?.hash) {
+				syncConflict = {
+					...conflict,
+					remote: current,
+					message: 'Der Serverstand hat sich erneut geändert. Prüfe beide Stände noch einmal.'
+				};
+				return;
+			}
+			await adoptRemoteWorkspace(current, conflict.connection);
+			syncConflict = null;
+			conflictOpen = false;
+			if (filesAfterConflict) showFilesManager();
+			announce('Der Stand von wwschool wurde geladen.');
+		} catch (error) {
+			syncError =
+				error instanceof Error ? error.message : 'Der Serverstand konnte nicht geladen werden.';
+			announce(syncError);
+		}
+	}
+
+	async function useLocalVersion() {
+		const conflict = syncConflict;
+		const credentials = webdavCredentials;
+		if (!conflict || !credentials) return;
+		const local = $state.snapshot(workspace) as WorkspaceSnapshot;
+		try {
+			const uploaded = await writeWebDavWorkspace(
+				credentials,
+				conflict.connection,
+				local,
+				conflict.remote?.hash ?? null
+			);
+			const state = nextSyncState(conflict.connection, uploaded.hash, uploaded.etag);
+			await saveWebDavSyncState(state);
+			webdavSyncState = state;
+			await persistWorkspaceNow(local);
+			markSaved(local);
+			syncConflict = null;
+			conflictOpen = false;
+			syncStatus = 'synced';
+			if (filesAfterConflict) showFilesManager();
+			announce('Der lokale Stand wurde übernommen.');
+		} catch (error) {
+			if (error instanceof WebDavConflictError) {
+				syncConflict = { ...conflict, local, remote: error.remote, message: error.message };
+				syncStatus = 'conflict';
+				return;
+			}
+			syncError =
+				error instanceof Error
+					? error.message
+					: 'Der lokale Stand konnte nicht hochgeladen werden.';
+			announce(syncError);
+		}
+	}
+
+	function openSyncConflict() {
+		if (syncConflict) conflictOpen = true;
+	}
+
 	function handleBeforeUnload(event: BeforeUnloadEvent) {
 		if (!hydrated) return;
 		flushWorkspace();
@@ -371,6 +863,7 @@
 
 	function handleVisibility() {
 		if (document.visibilityState === 'hidden') flushWorkspace();
+		else queueRemotePull();
 	}
 
 	function editActiveFile(value: string) {
@@ -388,6 +881,20 @@
 		const activeChanged = next.activeFileId !== workspace.activeFileId;
 		workspace = next;
 		if (activeChanged) pane = 'code';
+	}
+
+	function showShare() {
+		if (sharedCode === null) return;
+		viewingShare = true;
+		pane = 'code';
+		void tick().then(() => codeEditor?.focusEditor());
+	}
+
+	function discardShare() {
+		sharedCode = null;
+		viewingShare = false;
+		saveChooser = false;
+		clearSharedImportUrl();
 	}
 
 	function showFile(fileId: string) {
@@ -509,17 +1016,11 @@
 		viewingShare = false;
 		saveChooser = false;
 		pane = 'code';
-		const url = new URL(window.location.href);
-		if (url.searchParams.has(IMPORT_PARAM)) {
-			url.searchParams.delete(IMPORT_PARAM);
-			url.hash = '';
-			history.replaceState(null, '', `${url.pathname}${url.search}`);
-		}
+		clearSharedImportUrl();
 		void tick().then(() => codeEditor?.focusEditor());
 	}
 
-	function openExplorer() {
-		saveChooser = false;
+	function showFilesManager() {
 		const folderId = activeFile?.folderId;
 		if (folderId && workspace.selectedFolderId !== folderId) {
 			workspace = selectFolder(workspace, folderId);
@@ -528,10 +1029,28 @@
 		filesOpen = true;
 	}
 
+	function openFilesManager(saveSharedFile = false) {
+		saveChooser = saveSharedFile;
+		if (webdavCredentials && webdavConnection && syncStatus !== 'error') {
+			showFilesManager();
+			if (syncStatus === 'conflict') openSyncConflict();
+			return;
+		}
+		if (readLocalOnly()) {
+			showFilesManager();
+			return;
+		}
+		filesAfterLogin = true;
+		loginError = syncError;
+		loginOpen = true;
+	}
+
+	function openExplorer() {
+		openFilesManager();
+	}
+
 	function openSaveShare() {
-		saveChooser = true;
-		explorerToken += 1;
-		filesOpen = true;
+		openFilesManager(true);
 	}
 
 	function saveShared(folderId: string) {
@@ -542,11 +1061,12 @@
 		saveChooser = false;
 		filesOpen = false;
 		applyWorkspace(next);
-		const url = new URL(window.location.href);
-		url.searchParams.delete(IMPORT_PARAM);
-		url.hash = '';
-		history.replaceState(null, '', `${url.pathname}${url.search}`);
-		announce('Geteilte Datei gespeichert');
+		clearSharedImportUrl();
+		announce(
+			webdavCredentials
+				? 'Geteilte Datei gespeichert. Sie wird mit wwschool abgeglichen.'
+				: 'Geteilte Datei gespeichert'
+		);
 	}
 
 	function undo() {
@@ -737,7 +1257,7 @@
 		const savedAt = writeWorkspaceBackup(snapshot);
 		const stored = await enqueueSave(snapshot, ticket, savedAt);
 		const blobUrl = URL.createObjectURL(
-			new Blob([workspaceExport(snapshot)], { type: 'text/x-python;charset=utf-8' })
+			new Blob([await workspaceExport(snapshot)], { type: 'text/x-python;charset=utf-8' })
 		);
 		const link = document.createElement('a');
 		link.href = blobUrl;
@@ -789,12 +1309,23 @@
 		if (!(event.metaKey || event.ctrlKey)) return;
 		if (event.key.toLowerCase() === 's') {
 			event.preventDefault();
-			downloadCode();
+			if (viewingShare && sharedCode !== null) openSaveShare();
+			else downloadCode();
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
 			runCode();
 		}
 	}
+
+	$effect(() => {
+		const watching = webdavCredentials && webdavConnection && syncStatus === 'synced';
+		if (!watching) {
+			stopRemoteWatch();
+			return;
+		}
+		startRemoteWatch();
+		return () => stopRemoteWatch();
+	});
 
 	$effect(() => {
 		if (!hydrated || !workspace.welcomed) return;
@@ -1075,6 +1606,8 @@
 		void boot();
 		return () => {
 			cancelled = true;
+			if (remoteSyncTimer) clearTimeout(remoteSyncTimer);
+			stopRemoteWatch();
 			stopWatch();
 			narrowQuery.removeEventListener('change', syncNarrow);
 			window.removeEventListener('message', onPreviewMessage);
@@ -1101,7 +1634,7 @@
 			if (imported !== null) {
 				sharedCode = imported;
 				viewingShare = true;
-				announce('Geteilter Code geöffnet');
+				announce('Geteilter Code geöffnet. Die Datei ist nicht gespeichert.');
 			} else if (hasImport) {
 				announce('Der geteilte Code ist ungültig oder zu groß.');
 			}
@@ -1109,6 +1642,28 @@
 			markSaved(loaded.snapshot);
 			workspace = loaded.snapshot;
 			hydrated = true;
+			if (readLocalOnly()) return;
+			void loadWebDavCredentials()
+				.then((credentials) => {
+					if (!cancelled && credentials) {
+						webdavRemembered = !hasSessionWebDavCredentials();
+						return startWebDavSession(credentials, { store: 'keep' });
+					}
+				})
+				.catch(async (error) => {
+					if (cancelled) return;
+					if (error instanceof WebDavError && (error.status === 401 || error.status === 403)) {
+						await clearWebDavCredentials().catch(() => undefined);
+					}
+					webdavCredentials = null;
+					webdavConnection = null;
+					syncStatus = 'error';
+					syncError =
+						error instanceof Error
+							? error.message
+							: 'Die Anmeldung konnte nicht wiederhergestellt werden.';
+					announce(syncError);
+				});
 		}
 	});
 </script>
@@ -1117,7 +1672,7 @@
 	<title>K+ Coder</title>
 	<meta
 		name="description"
-		content="Python, HTML, CSS und JavaScript direkt und vollständig lokal im Browser."
+		content="Python, HTML, CSS und JavaScript im Browser bearbeiten – lokal oder synchronisiert mit wwschool."
 	/>
 </svelte:head>
 
@@ -1139,11 +1694,11 @@
 				class="files-button"
 				onclick={openExplorer}
 				aria-label="Dateien"
-				title={dirty ? 'Ungespeicherte Änderungen' : 'Dateien'}
+				title={dirty || sharedCode !== null ? 'Ungespeicherte Änderungen' : 'Dateien'}
 			>
 				<Files />
 				<span class="action-label">Dateien</span>
-				{#if dirty}<i class="dirty-mark" aria-hidden="true"></i>{/if}
+				{#if dirty || sharedCode !== null}<i class="dirty-mark" aria-hidden="true"></i>{/if}
 			</Button>
 			<div class="toolbar">
 				<ButtonGroup.Root aria-label="Ausführen und Datei">
@@ -1194,8 +1749,8 @@
 							variant="outline"
 							size={narrow ? 'icon-sm' : 'sm'}
 							onclick={openSaveShare}
-							aria-label="In Dateien speichern"
-							title="In Dateien speichern"
+							aria-label="Geteilte Datei speichern"
+							title="Geteilte Datei ist nicht gespeichert. Ordner in Dateien wählen."
 							><Save /><span class="action-label">Speichern</span></Button
 						>
 					{/if}
@@ -1219,8 +1774,51 @@
 							>
 						{/snippet}
 					</Popover.Trigger>
-					<Popover.Content>
+					<Popover.Content class="w-72">
 						<div class="settings">
+							<p class="settings-label">wwschool</p>
+							{#if webdavCredentials}
+								<p class="settings-email" title={webdavCredentials.username}>
+									{webdavCredentials.username}
+								</p>
+								{#if !webdavRemembered}
+									<p class="settings-note">Nur diese Sitzung</p>
+								{/if}
+								{#if syncStatus === 'error'}
+									<p class="settings-error" role="alert">{syncError || 'Verbindung gestört'}</p>
+									<Button
+										variant="outline"
+										size="sm"
+										class="w-full justify-start"
+										onclick={() => void reconnectWebDav()}
+										disabled={loginBusy}
+									>
+										{#if loginBusy}<LoaderCircle class="animate-spin" />{/if}
+										<span>Erneut verbinden</span>
+									</Button>
+								{/if}
+								<Button
+									variant="outline"
+									size="sm"
+									class="w-full justify-start"
+									onclick={() => void logoutWebDav()}
+									aria-label="Von wwschool abmelden"
+								>
+									<LogOut />
+									<span>Abmelden</span>
+								</Button>
+							{:else}
+								<Button
+									variant="outline"
+									size="sm"
+									class="w-full justify-start"
+									onclick={openLogin}
+									aria-label="Bei wwschool anmelden"
+								>
+									<LogIn />
+									<span>Anmelden</span>
+								</Button>
+							{/if}
 							<Button
 								variant="outline"
 								size="sm"
@@ -1331,8 +1929,143 @@
 		ondownload={downloadDatabase}
 		onnotice={announce}
 		onrestore={restoredWorkspace}
+		syncStatus={syncStatus === 'connecting' ? 'syncing' : syncStatus}
+		syncLocation={webdavConnection?.personalName ?? ''}
+		onresolve={syncConflict ? openSyncConflict : undefined}
 		onsave={saveChooser ? saveShared : undefined}
 	/>
+	<Dialog.Root
+		bind:open={loginOpen}
+		onOpenChange={(open) => {
+			if (!open) {
+				loginPassword = '';
+				loginError = '';
+				if (!filesOpen) {
+					filesAfterLogin = false;
+					saveChooser = false;
+				}
+			}
+		}}
+	>
+		<Dialog.Content class="sm:max-w-sm">
+			<Dialog.Header>
+				<Dialog.Title>Bei wwschool anmelden</Dialog.Title>
+				<Dialog.Description>
+					Dein Workspace bleibt lokal gespeichert und wird mit wwschool abgeglichen.
+				</Dialog.Description>
+			</Dialog.Header>
+			<form class="grid gap-4" onsubmit={submitWebDavLogin}>
+				<div class="grid gap-2">
+					<Label for="wwschool-username">E-Mail-Adresse</Label>
+					<input
+						class="h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+						id="wwschool-username"
+						bind:value={loginUsername}
+						autocomplete="username"
+						required
+						disabled={loginBusy}
+					/>
+				</div>
+				<div class="grid gap-2">
+					<Label for="wwschool-password">Passwort</Label>
+					<input
+						class="h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+						id="wwschool-password"
+						type="password"
+						bind:value={loginPassword}
+						autocomplete="current-password"
+						required
+						disabled={loginBusy}
+					/>
+				</div>
+				<label class="stay-logged" for="wwschool-stay">
+					<input id="wwschool-stay" type="checkbox" bind:checked={loginStay} disabled={loginBusy} />
+					<span>Angemeldet bleiben</span>
+				</label>
+				<p class="text-xs text-muted-foreground">
+					Ohne Haken gilt die Anmeldung nur für diese Sitzung.
+				</p>
+				{#if loginError}
+					<p class="text-sm text-destructive" role="alert">{loginError}</p>
+				{/if}
+				<div class="grid gap-1">
+					<Button type="submit" disabled={loginBusy}>
+						{#if loginBusy}<LoaderCircle class="animate-spin" />{/if}
+						{loginBusy ? 'Anmelden …' : 'Anmelden'}
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="xs"
+						disabled={loginBusy}
+						onclick={continueLocally}
+					>
+						Lokal weiterarbeiten
+					</Button>
+				</div>
+			</form>
+		</Dialog.Content>
+	</Dialog.Root>
+	<Dialog.Root bind:open={conflictOpen}>
+		<Dialog.Content class="sm:max-w-xl">
+			<Dialog.Header>
+				<Dialog.Title>Abweichende Stände</Dialog.Title>
+				<Dialog.Description>{syncConflict?.message}</Dialog.Description>
+			</Dialog.Header>
+			{#if syncConflict}
+				<div class="grid gap-3 text-sm">
+					<div class="grid grid-cols-2 gap-3 rounded-md border p-3">
+						<div class="grid gap-1">
+							<p class="text-muted-foreground">Lokal</p>
+							<p class="flex gap-1 font-medium">
+								<span>{syncConflict.local.files.length}</span><span>&nbsp;Dateien</span>
+							</p>
+						</div>
+						<div class="grid gap-1">
+							<p class="text-muted-foreground">wwschool</p>
+							<p class="flex gap-1 font-medium">
+								{#if syncConflict.remote}
+									<span>{syncConflict.remote.snapshot.files.length}</span><span>&nbsp;Dateien</span>
+								{:else}
+									<span>Datei fehlt</span>
+								{/if}
+							</p>
+						</div>
+					</div>
+					<p>Beide Stände bleiben unverändert, bis du eine Seite übernimmst.</p>
+				</div>
+			{/if}
+			<Dialog.Footer class="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+				<Button
+					type="button"
+					variant="outline"
+					class="w-full whitespace-normal sm:col-span-2"
+					onclick={() => (conflictOpen = false)}
+				>
+					Später
+				</Button>
+				{#if syncConflict?.remote}
+					<Button
+						type="button"
+						variant="outline"
+						class="w-full min-w-0 whitespace-normal"
+						onclick={() => void useRemoteVersion()}
+					>
+						wwschool laden
+					</Button>
+				{/if}
+				<Button
+					type="button"
+					class={syncConflict?.remote
+						? 'w-full min-w-0 whitespace-normal'
+						: 'w-full min-w-0 whitespace-normal sm:col-span-2'}
+					onclick={() => void useLocalVersion()}
+				>
+					Lokal übernehmen
+				</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
 	<NewFileDialog bind:open={createOpen} oncreate={createNamedFile} />
 	<WelcomeDialog
 		open={!viewingShare && !workspace.welcomed}
@@ -1406,6 +2139,30 @@
 	<div class="editor-tabs">
 		<div class="pane-header">
 			<div class="file-tabs" role="tablist" aria-label="Geöffnete Dateien">
+				{#if sharedCode !== null}
+					<div class="file-tab" class:active={pane === 'code' && viewingShare}>
+						<button
+							type="button"
+							role="tab"
+							class="tab-name"
+							aria-selected={pane === 'code' && viewingShare}
+							title="Geteilte Datei ist nicht gespeichert"
+							onclick={showShare}
+						>
+							geteilt.py
+							<i class="dirty-mark" aria-hidden="true"></i>
+							<em>Nicht gespeichert</em>
+						</button>
+						<button
+							type="button"
+							class="tab-close"
+							aria-label="Geteilte Datei schließen"
+							onclick={discardShare}
+						>
+							<X />
+						</button>
+					</div>
+				{/if}
 				{#each openFiles as file (file.id)}
 					<div
 						class="file-tab"
@@ -1758,6 +2515,34 @@
 		letter-spacing: 0.03em;
 		text-transform: uppercase;
 	}
+	.settings-email {
+		margin: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font: 500 0.78rem/1.3 var(--font-sans);
+	}
+	.settings-note,
+	.settings-error {
+		margin: 0;
+		font-size: 0.72rem;
+		line-height: 1.3;
+	}
+	.settings-note {
+		color: var(--muted-foreground);
+	}
+	.stay-logged {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.stay-logged input {
+		width: 0.95rem;
+		height: 0.95rem;
+		accent-color: var(--foreground);
+	}
 	:global(.run-busy) {
 		background: color-mix(in oklch, var(--background) 72%, black) !important;
 		color: var(--muted-foreground) !important;
@@ -1827,6 +2612,13 @@
 		color: inherit;
 		font: 500 0.8rem/1 var(--font-sans);
 		cursor: pointer;
+	}
+	.tab-name em {
+		color: var(--muted-foreground);
+		font-style: normal;
+		font-size: 0.65rem;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
 	}
 	.tab-close {
 		display: grid;

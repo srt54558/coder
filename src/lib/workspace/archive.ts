@@ -16,6 +16,7 @@ gespeicherte Datenbank zu ersetzen.
 from __future__ import annotations
 
 import base64
+import gzip
 import json
 import sys
 from pathlib import Path
@@ -30,7 +31,10 @@ def load_workspace(text: str) -> dict:
         raise ValueError("Markierung fehlt")
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
     encoded = "".join(ch for ch in text[start + len(begin) : stop] if ch in alphabet)
-    data = json.loads(base64.b64decode(encoded))
+    raw = base64.b64decode(encoded)
+    if raw[:2] == bytes((31, 139)):
+        raw = gzip.decompress(raw)
+    data = json.loads(raw)
     if data.get("application") != "python.k-plus.one" or not isinstance(data.get("workspace"), dict):
         raise ValueError("Unbekanntes Format")
     return data["workspace"]
@@ -153,8 +157,7 @@ if __name__ == "__main__":
     main()
 `;
 
-function base64FromText(text: string): string {
-	const bytes = new TextEncoder().encode(text);
+function base64FromBytes(bytes: Uint8Array): string {
 	const chunks: string[] = [];
 	for (let index = 0; index < bytes.length; index += 0x8000) {
 		chunks.push(String.fromCharCode(...bytes.subarray(index, index + 0x8000)));
@@ -162,11 +165,11 @@ function base64FromText(text: string): string {
 	return btoa(chunks.join(''));
 }
 
-function textFromBase64(encoded: string): string {
+function bytesFromBase64(encoded: string): Uint8Array {
 	const binary = atob(encoded);
 	const bytes = new Uint8Array(binary.length);
 	for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-	return new TextDecoder().decode(bytes);
+	return bytes;
 }
 
 function wrap(value: string, width = 76): string {
@@ -177,33 +180,74 @@ function wrap(value: string, width = 76): string {
 	return lines.join('\n');
 }
 
-export function workspaceExport(snapshot: WorkspaceSnapshot): string {
-	const encoded = wrap(
-		base64FromText(
-			JSON.stringify({
-				application: 'python.k-plus.one',
-				exportedAt: new Date().toISOString(),
-				workspace: snapshot
-			})
-		)
-	);
-	return `${RESTORE_PROGRAM}\n${BEGIN}\n${encoded}\n${END}\n`;
+function isGzip(bytes: Uint8Array): boolean {
+	return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
-export function parseWorkspaceArchive(source: string): WorkspaceSnapshot | null {
+function bytesAsBuffer(bytes: Uint8Array): ArrayBuffer {
+	const copy = new ArrayBuffer(bytes.byteLength);
+	new Uint8Array(copy).set(bytes);
+	return copy;
+}
+
+async function gzipCompress(bytes: Uint8Array): Promise<Uint8Array> {
+	if (typeof CompressionStream !== 'function') return bytes;
+	const stream = new Blob([bytesAsBuffer(bytes)])
+		.stream()
+		.pipeThrough(new CompressionStream('gzip'));
+	return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function gzipDecompress(bytes: Uint8Array): Promise<Uint8Array> {
+	if (typeof DecompressionStream !== 'function') {
+		throw new Error('gzip');
+	}
+	const stream = new Blob([bytesAsBuffer(bytes)])
+		.stream()
+		.pipeThrough(new DecompressionStream('gzip'));
+	return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function archivePayload(snapshot: WorkspaceSnapshot): string {
+	return JSON.stringify({
+		application: 'python.k-plus.one',
+		exportedAt: new Date().toISOString(),
+		workspace: snapshot
+	});
+}
+
+function parseArchivePayload(text: string): WorkspaceSnapshot | null {
+	const parsed = JSON.parse(text) as {
+		application?: unknown;
+		workspace?: unknown;
+	};
+	if (parsed.application !== 'python.k-plus.one') return null;
+	if (!parsed.workspace || typeof parsed.workspace !== 'object') return null;
+	return sanitizeWorkspace(parsed.workspace as WorkspaceSnapshot);
+}
+
+export function looksLikeWorkspaceArchive(source: string): boolean {
+	const start = source.lastIndexOf(BEGIN);
+	if (start < 0) return false;
+	return source.indexOf(END, start + BEGIN.length) >= 0;
+}
+
+export async function workspaceExport(snapshot: WorkspaceSnapshot): Promise<string> {
+	const json = new TextEncoder().encode(archivePayload(snapshot));
+	const compressed = await gzipCompress(json);
+	return `${RESTORE_PROGRAM}\n${BEGIN}\n${wrap(base64FromBytes(compressed))}\n${END}\n`;
+}
+
+export async function parseWorkspaceArchive(source: string): Promise<WorkspaceSnapshot | null> {
 	try {
 		const start = source.lastIndexOf(BEGIN);
 		const end = start < 0 ? -1 : source.indexOf(END, start + BEGIN.length);
 		if (start < 0 || end < 0) return null;
 		const encoded = source.slice(start + BEGIN.length, end).replace(/[^A-Za-z0-9+/=]/g, '');
 		if (!encoded) return null;
-		const parsed = JSON.parse(textFromBase64(encoded)) as {
-			application?: unknown;
-			workspace?: unknown;
-		};
-		if (parsed.application !== 'python.k-plus.one') return null;
-		if (!parsed.workspace || typeof parsed.workspace !== 'object') return null;
-		return sanitizeWorkspace(parsed.workspace as WorkspaceSnapshot);
+		const bytes = bytesFromBase64(encoded);
+		const jsonBytes = isGzip(bytes) ? await gzipDecompress(bytes) : bytes;
+		return parseArchivePayload(new TextDecoder().decode(jsonBytes));
 	} catch {
 		return null;
 	}
