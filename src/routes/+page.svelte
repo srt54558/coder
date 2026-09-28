@@ -114,7 +114,6 @@
 	const SAVE_DELAY_MS = 250;
 	const REMOTE_SYNC_DELAY_MS = 400;
 	const REMOTE_POLL_MS = 2_500;
-	const DEFAULT_WEBDAV_USERNAME = 'kri.avramovic@stg-segeberg.de';
 	const LOCAL_ONLY_KEY = 'kplus-coder-local-only';
 	const SHARED_PREVIEW_ID = 'shared-preview';
 
@@ -174,7 +173,7 @@
 	let filesAfterConflict = false;
 	let filesAfterLogin = false;
 	let loginOpen = $state(false);
-	let loginUsername = $state(DEFAULT_WEBDAV_USERNAME);
+	let loginUsername = $state('');
 	let loginPassword = $state('');
 	let loginStay = $state(true);
 	let loginBusy = $state(false);

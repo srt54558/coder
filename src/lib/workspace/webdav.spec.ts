@@ -5,6 +5,7 @@ import {
 	WebDavConflictError,
 	hashWorkspace,
 	isEmptyWorkspace,
+	isPersonalFolderHref,
 	writeWebDavWorkspace,
 	type WebDavConnection,
 	type WebDavCredentials
@@ -19,16 +20,24 @@ const connection: WebDavConnection = {
 
 afterEach(() => vi.unstubAllGlobals());
 
-function emptyPropfind(): Response {
-	return new Response(
-		`<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:"></D:multistatus>`,
-		{ status: 207 }
-	);
-}
-
 describe('wwschool workspace sync', () => {
 	it('recognizes the untouched starter workspace after the welcome screen', () => {
 		expect(isEmptyWorkspace({ ...createInitialWorkspace(), welcomed: true })).toBe(true);
+	});
+
+	it('picks the personal folder from the login in the WebDAV href', () => {
+		const user = 'kri.avramovic@stg-segeberg.de';
+		expect(isPersonalFolderHref(`/webdav.php/${user}/`, user)).toBe(true);
+		expect(
+			isPersonalFolderHref(
+				`https://www.wwschool.de/webdav.php/${user}/`,
+				user.toLocaleUpperCase('de')
+			)
+		).toBe(true);
+		expect(isPersonalFolderHref(`/webdav.php/${encodeURIComponent(user)}/`, user)).toBe(true);
+		expect(isPersonalFolderHref('/webdav.php/5079@stg-segeberg.de/', user)).toBe(false);
+		expect(isPersonalFolderHref('/webdav.php/jgq1@stg-segeberg.de/', user)).toBe(false);
+		expect(isPersonalFolderHref('/webdav.php/oberstufe@stg-segeberg.de/', user)).toBe(false);
 	});
 
 	it('creates a missing workspace as coder-workspace.py', async () => {
@@ -46,8 +55,6 @@ describe('wwschool workspace sync', () => {
 					return new Response(workspaceText, { status: 200 });
 				}
 				if (method === 'GET') return new Response(null, { status: 404 });
-				if (method === 'PROPFIND') return emptyPropfind();
-				if (method === 'DELETE') return new Response(null, { status: 404 });
 				if (method === 'PUT' && url === connection.workspaceHref) {
 					workspaceText = body;
 					return new Response(null, { status: 201 });
@@ -60,15 +67,13 @@ describe('wwschool workspace sync', () => {
 		const result = await writeWebDavWorkspace(credentials, connection, snapshot, null);
 
 		expect(result.snapshot).toEqual(snapshot);
-		expect(calls.find((call) => call.method === 'PUT')?.url).toBe(connection.workspaceHref);
-		expect(calls.find((call) => call.method === 'PUT')?.url.endsWith('/coder-workspace.py')).toBe(
-			true
-		);
-		expect(calls.find((call) => call.method === 'PUT')?.body).toContain(
-			'# BEGIN KPLUS_WORKSPACE_V1'
-		);
-		expect(calls.find((call) => call.method === 'PUT')?.headers.has('Content-Type')).toBe(false);
+		expect(calls.map((call) => call.method)).toEqual(['GET', 'PUT', 'GET']);
+		expect(calls[1]?.url).toBe(connection.workspaceHref);
+		expect(calls[1]?.url.endsWith('/coder-workspace.py')).toBe(true);
+		expect(calls[1]?.body).toContain('# BEGIN KPLUS_WORKSPACE_V1');
+		expect(calls[1]?.headers.has('Content-Type')).toBe(false);
 		expect(calls.some((call) => call.method === 'MOVE')).toBe(false);
+		expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
 	});
 
 	it('stops before writing when the remote file differs from the expected base', async () => {
@@ -83,13 +88,13 @@ describe('wwschool workspace sync', () => {
 		expect(fetch).toHaveBeenCalledTimes(1);
 	});
 
-	it('deletes the previous file and puts the same coder-workspace.py', async () => {
+	it('overwrites the same coder-workspace.py on later saves', async () => {
 		const previousSnapshot = createInitialWorkspace('print("alt")');
 		const nextSnapshot = createInitialWorkspace('print("neu")');
-		let workspaceText = await workspaceExport(previousSnapshot);
-		const store = new Map<string, string>([[connection.workspaceHref, workspaceText]]);
+		const store = new Map<string, string>([
+			[connection.workspaceHref, await workspaceExport(previousSnapshot)]
+		]);
 		const putUrls: string[] = [];
-		const deleted: string[] = [];
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -99,33 +104,10 @@ describe('wwschool workspace sync', () => {
 					const text = store.get(url);
 					return text ? new Response(text, { status: 200 }) : new Response(null, { status: 404 });
 				}
-				if (method === 'PROPFIND') {
-					return new Response(
-						`<?xml version="1.0" encoding="utf-8"?>
-<D:multistatus xmlns:D="DAV:">
-  <D:response>
-    <D:href>/webdav.php/person/${WORKSPACE_ARCHIVE_NAME}</D:href>
-    <D:propstat>
-      <D:prop><D:resourcetype/><D:displayname>${WORKSPACE_ARCHIVE_NAME}</D:displayname></D:prop>
-      <D:status>HTTP/1.1 200 OK</D:status>
-    </D:propstat>
-  </D:response>
-</D:multistatus>`,
-						{ status: 207 }
-					);
-				}
-				if (method === 'DELETE') {
-					deleted.push(url);
-					store.delete(url);
-					return new Response(null, { status: 204 });
-				}
-				if (method === 'PUT') {
-					if (store.has(url)) {
-						throw new Error(`PUT created a second file at ${url}`);
-					}
+				if (method === 'PUT' && url === connection.workspaceHref) {
 					putUrls.push(url);
 					store.set(url, String(init?.body ?? ''));
-					return new Response(null, { status: 201 });
+					return new Response(null, { status: 204 });
 				}
 				throw new Error(`Unexpected WebDAV ${method} ${url}`);
 			})
@@ -139,10 +121,8 @@ describe('wwschool workspace sync', () => {
 		);
 
 		expect(result.snapshot).toEqual(nextSnapshot);
-		expect(deleted).toContain(connection.workspaceHref);
 		expect(putUrls).toEqual([connection.workspaceHref]);
-		expect(store.size).toBe(1);
-		expect(store.has(connection.workspaceHref)).toBe(true);
+		expect([...store.keys()]).toEqual([connection.workspaceHref]);
 	});
 
 	it('writes later saves to the same workspace url', async () => {
@@ -158,11 +138,6 @@ describe('wwschool workspace sync', () => {
 				if (method === 'GET') {
 					const text = store.get(url);
 					return text ? new Response(text, { status: 200 }) : new Response(null, { status: 404 });
-				}
-				if (method === 'PROPFIND') return emptyPropfind();
-				if (method === 'DELETE') {
-					store.delete(url);
-					return new Response(null, { status: 404 });
 				}
 				if (method === 'PUT') {
 					putUrls.push(url);
