@@ -2,7 +2,7 @@
 	"id": "/",
 	"name": "K+ Coder",
 	"short_name": "K+ Coder",
-	"description": "Python, HTML, CSS und JavaScript direkt und vollständig lokal im Browser.",
+	"description": "Python, HTML, CSS und JavaScript direkt im Browser schreiben und ausführen.",
 	"lang": "de",
 	"dir": "ltr",
 	"start_url": "/",

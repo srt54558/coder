@@ -23,21 +23,24 @@
 		keymap,
 		lineNumbers
 	} from '@codemirror/view';
-	import { applyDocChanges } from '$lib/editor/doc-changes';
-	import { diagnosticsForDocument, positionToOffset } from '$lib/editor/diagnostics';
+	import { applyDocChanges } from '#lib/editor/doc-changes.js';
+	import { diagnosticsForDocument, positionToOffset } from '#lib/editor/diagnostics.js';
 	import {
 		fallbackLanguageExtensions,
 		loadLanguageExtensions,
 		syncLanguageExtensions
-	} from '$lib/editor/language';
-	import { themeExtensions } from '$lib/editor/themes';
-	import type { RuffDiagnostic } from '$lib/runner/protocol';
-	import type { AppTheme } from '$lib/theme';
-	import type { CodeLanguage } from '$lib/workspace/model';
+	} from '#lib/editor/language.js';
+	import { themeExtensions } from '#lib/editor/themes.js';
+	import type { RuffDiagnostic } from '#lib/runner/protocol.js';
+	import type { AppTheme } from '#lib/theme.js';
+	import type { CodeLanguage } from '#lib/workspace/model.js';
+	import type * as Y from 'yjs';
+	import { yCollab } from 'y-codemirror.next';
 
 	let {
 		fileId,
 		value,
+		sharedText = null,
 		language = 'python',
 		diagnostics,
 		theme,
@@ -49,6 +52,7 @@
 	}: {
 		fileId: string;
 		value: string;
+		sharedText?: Y.Text | null;
 		language?: CodeLanguage;
 		diagnostics: RuffDiagnostic[];
 		theme: AppTheme;
@@ -69,6 +73,7 @@
 	let ready = $state(false);
 	let view: EditorView | undefined;
 	let loadedFileId = '';
+	let loadedSharedText: Y.Text | null = null;
 	let wasVisible = false;
 	let emitted = '';
 
@@ -94,7 +99,7 @@
 	function createState(doc: string) {
 		emitted = doc;
 		return EditorState.create({
-			doc,
+			doc: sharedText?.toString() ?? doc,
 			extensions: [
 				lineNumbers(),
 				highlightActiveLineGutter(),
@@ -103,6 +108,7 @@
 				history(),
 				indentUnit.of('    '),
 				EditorState.tabSize.of(4),
+				...(sharedText ? [yCollab(sharedText, null, { undoManager: false })] : []),
 				indentOnInput(),
 				bracketMatching(),
 				closeBrackets(),
@@ -120,6 +126,7 @@
 				EditorView.updateListener.of((update) => {
 					if (
 						update.docChanged &&
+						!sharedText &&
 						!update.transactions.some((transaction) => transaction.annotation(externalChange))
 					) {
 						const patches: { from: number; to: number; insert: string }[] = [];
@@ -131,6 +138,24 @@
 					if (update.docChanged || update.transactions.length > 0) reportHistory(update.state);
 				})
 			]
+		});
+	}
+
+	function applyExternalDocument(next: string) {
+		if (!view) return;
+		const current = view.state.doc.toString();
+		if (current === next) return;
+		let from = 0;
+		while (from < current.length && from < next.length && current[from] === next[from]) from += 1;
+		let currentEnd = current.length;
+		let nextEnd = next.length;
+		while (currentEnd > from && nextEnd > from && current[currentEnd - 1] === next[nextEnd - 1]) {
+			currentEnd -= 1;
+			nextEnd -= 1;
+		}
+		view.dispatch({
+			changes: { from, to: currentEnd, insert: next.slice(from, nextEnd) },
+			annotations: externalChange.of(true)
 		});
 	}
 
@@ -176,6 +201,7 @@
 		const parent = host;
 		if (!parent) return;
 		loadedFileId = fileId;
+		loadedSharedText = sharedText;
 		view = new EditorView({
 			parent,
 			state: createState(value)
@@ -193,10 +219,11 @@
 		if (!ready || !view) return;
 		const id = fileId;
 		const next = value;
-		if (id !== loadedFileId) {
+		const nextSharedText = sharedText;
+		if (id !== loadedFileId || nextSharedText !== loadedSharedText) {
 			loadedFileId = id;
-			if (view.state.doc.toString() !== next) view.setState(createState(next));
-			else emitted = next;
+			loadedSharedText = nextSharedText;
+			view.setState(createState(next));
 			reportHistory(view.state);
 			return;
 		}
@@ -204,10 +231,7 @@
 			emitted = next;
 			return;
 		}
-		view.dispatch({
-			changes: { from: 0, to: view.state.doc.length, insert: next },
-			annotations: externalChange.of(true)
-		});
+		applyExternalDocument(next);
 		emitted = next;
 	});
 

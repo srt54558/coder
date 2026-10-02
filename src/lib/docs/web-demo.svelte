@@ -9,11 +9,11 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { renderDocumentPreview } from '$lib/editor/document-preview';
-	import { previewDocument, readPreviewMessage } from '$lib/editor/preview';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import { clipBlocks } from '$lib/runner/limits';
-	import { isHtmlFile } from '$lib/workspace/model';
+	import { renderDocumentPreview } from '#lib/editor/document-preview.js';
+	import { previewDocument, readPreviewMessage } from '#lib/editor/preview.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { clipBlocks } from '#lib/runner/limits.js';
+	import { isHtmlFile } from '#lib/workspace/model.js';
 
 	let { code, filename }: { code: string; filename?: string } = $props();
 

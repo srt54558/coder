@@ -45,7 +45,10 @@ export function previewDocument(source: string, token: number, links?: PreviewLi
 		return linked.replace(/<head\b[^>]*>/i, (head) => `${mark}${head}${bridge}`);
 	}
 	if (/<html\b[^>]*>/i.test(linked)) {
-		return linked.replace(/<html\b[^>]*>/i, (tag) => `${mark}${tag}<head><meta charset="utf-8">${bridge}</head>`);
+		return linked.replace(
+			/<html\b[^>]*>/i,
+			(tag) => `${mark}${tag}<head><meta charset="utf-8">${bridge}</head>`
+		);
 	}
 	return `${mark}${bridge}${linked}`;
 }
@@ -85,7 +88,12 @@ export function readPreviewMessage(
 /** Project path named by a preview stack or error, when the call did not come from the page itself. */
 export function previewFileFromUrl(url: string): string | null {
 	const value = url.trim();
-	if (!value || value.includes('about:srcdoc') || value.startsWith('data:') || value.startsWith('blob:')) {
+	if (
+		!value ||
+		value.includes('about:srcdoc') ||
+		value.startsWith('data:') ||
+		value.startsWith('blob:')
+	) {
 		return null;
 	}
 	let path = value;
@@ -152,8 +160,7 @@ export function readPreviewDone(data: unknown, token: number): boolean {
 }
 
 export type PreviewRequest =
-	| { kind: 'open'; url: string }
-	| { kind: 'read'; id: number; url: string };
+	{ kind: 'open'; url: string } | { kind: 'read'; id: number; url: string };
 
 export function readPreviewRequest(data: unknown, token: number): PreviewRequest | null {
 	if (!data || typeof data !== 'object') return null;
@@ -164,7 +171,11 @@ export function readPreviewRequest(data: unknown, token: number): PreviewRequest
 		url?: string;
 		id?: number;
 	};
-	if (message.source !== 'kplus-preview' || message.token !== token || typeof message.url !== 'string') {
+	if (
+		message.source !== 'kplus-preview' ||
+		message.token !== token ||
+		typeof message.url !== 'string'
+	) {
 		return null;
 	}
 	if (message.kind === 'open') return { kind: 'open', url: message.url };

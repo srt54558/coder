@@ -4,7 +4,10 @@ import { renderDocumentPreview } from './document-preview';
 
 describe('document preview', () => {
 	it('renders markdown as a page and leaves html untouched', () => {
-		const page = renderDocumentPreview('notiz.md', '# Titel\n\nEin **Satz** und `code`.\n\n- Punkt\n');
+		const page = renderDocumentPreview(
+			'notiz.md',
+			'# Titel\n\nEin **Satz** und `code`.\n\n- Punkt\n'
+		);
 		expect(page).toContain('<h1>Titel</h1>');
 		expect(page).toContain('<strong>Satz</strong>');
 		expect(page).toContain('<code>code</code>');
@@ -14,10 +17,14 @@ describe('document preview', () => {
 
 	it('shows json, xml, and text without treating them as markup', () => {
 		expect(renderDocumentPreview('daten.json', '{"name":"Welt"}')).toContain('"name": "Welt"');
-		expect(renderDocumentPreview('daten.xml', '<name>Welt</name>')).toContain('&lt;name&gt;Welt&lt;/name&gt;');
+		expect(renderDocumentPreview('daten.xml', '<name>Welt</name>')).toContain(
+			'&lt;name&gt;Welt&lt;/name&gt;'
+		);
 		expect(renderDocumentPreview('notiz.txt', '<b>roh</b>')).toContain('&lt;b&gt;roh&lt;/b&gt;');
 		expect(renderDocumentPreview('app.js', 'if (a < b)')).toContain('a &lt; b');
-		expect(renderDocumentPreview('style.css', 'h1 { color: red; }')).toContain('h1 { color: red; }');
+		expect(renderDocumentPreview('style.css', 'h1 { color: red; }')).toContain(
+			'h1 { color: red; }'
+		);
 	});
 
 	it('keeps a dark page distinct and inlines a local markdown image', () => {

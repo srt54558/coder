@@ -27,9 +27,6 @@ declare module 'css-tree' {
 	export function walk(ast: CssNode, callback: (node: CssNode) => void): void;
 
 	export const lexer: {
-		matchProperty(
-			property: string,
-			value: CssNode
-		): { error?: { message?: string } | null };
+		matchProperty(property: string, value: CssNode): { error?: { message?: string } | null };
 	};
 }

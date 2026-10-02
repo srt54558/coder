@@ -2,7 +2,11 @@
 
 import { clipText } from './limits';
 import { presentPythonError } from './python-error';
-import type { PythonWorkerMessage } from './protocol';
+import {
+	PYTHON_INPUT_HEADER_BYTES,
+	PYTHON_INPUT_MAX_BYTES,
+	type PythonWorkerMessage
+} from './protocol';
 import { PYODIDE_BASE } from './pyodide-runtime';
 import { diffProjectFiles, isSafeProjectPath } from './project-files';
 
@@ -15,6 +19,7 @@ interface PyodideRuntime {
 	): Promise<unknown>;
 	setStdout(options: { batched: (text: string) => void }): void;
 	setStderr(options: { batched: (text: string) => void }): void;
+	setStdin(options: { stdin: () => string; isatty?: boolean }): void;
 	globals: PyGlobals;
 }
 
@@ -122,6 +127,22 @@ self.onmessage = async (
 				send({ type: 'output', id, stream: 'stderr', text: chunk });
 			}
 		});
+		runtime.setStdin({
+			isatty: true,
+			stdin: () => {
+				if (typeof SharedArrayBuffer === 'undefined') {
+					throw new Error('Interaktive Eingabe ist in diesem Browser nicht verfügbar.');
+				}
+				const buffer = new SharedArrayBuffer(PYTHON_INPUT_HEADER_BYTES + PYTHON_INPUT_MAX_BYTES);
+				const header = new Int32Array(buffer, 0, 2);
+				send({ type: 'input', id, buffer });
+				Atomics.wait(header, 0, 0);
+				const length = Atomics.load(header, 1);
+				return new TextDecoder().decode(
+					new Uint8Array(buffer, PYTHON_INPUT_HEADER_BYTES, length).slice()
+				);
+			}
+		});
 		await runtime.loadPackagesFromImports(code);
 		const next = Object.fromEntries(
 			files.filter((file) => isSafeProjectPath(file.path)).map((file) => [file.path, file.content])
@@ -138,6 +159,20 @@ self.onmessage = async (
 		globals = makeDict();
 		globals.set('__name__', '__main__');
 		if (filename && isSafeProjectPath(filename)) globals.set('__file__', `/workspace/${filename}`);
+		globals.set('__kplus_emit_input_prompt', (prompt: string) => {
+			if (!prompt) return;
+			stdout = clipText(stdout + prompt);
+			send({ type: 'output', id, stream: 'stdout', text: prompt });
+		});
+		await runtime.runPythonAsync(
+			`import builtins as __kplus_builtins
+def input(prompt=''):
+    if prompt is not None:
+        __kplus_emit_input_prompt(str(prompt))
+    return __kplus_builtins.input()
+`,
+			{ globals }
+		);
 		await runtime.runPythonAsync(code, filename ? { globals, filename } : { globals });
 
 		send({

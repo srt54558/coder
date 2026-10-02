@@ -1,4 +1,4 @@
-import { isDiagnosticError, type RuffDiagnostic } from '$lib/runner/protocol';
+import { isDiagnosticError, type RuffDiagnostic } from '#lib/runner/protocol.js';
 
 const FRAME = /^ {2}File "([^"]+)", line (\d+)/;
 

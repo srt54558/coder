@@ -1,7 +1,7 @@
 import { tags } from '@lezer/highlight';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
-import { isDarkTheme, type AppTheme } from '$lib/theme';
+import { isDarkTheme, type AppTheme } from '#lib/theme.js';
 
 interface Palette {
 	keyword: string;

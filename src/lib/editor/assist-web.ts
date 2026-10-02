@@ -8,7 +8,7 @@ import {
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
 import type { Extension } from '@codemirror/state';
-import type { CodeLanguage } from '$lib/workspace/model';
+import type { CodeLanguage } from '#lib/workspace/model.js';
 import { docsHover } from './assist';
 
 const BROWSER_GLOBALS =

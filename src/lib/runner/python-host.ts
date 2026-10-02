@@ -1,5 +1,10 @@
 import { clipText } from './limits';
-import type { PythonWorkerMessage, RunnerStatus } from './protocol';
+import {
+	PYTHON_INPUT_HEADER_BYTES,
+	PYTHON_INPUT_MAX_BYTES,
+	type PythonWorkerMessage,
+	type RunnerStatus
+} from './protocol';
 
 export const RUN_TIMEOUT_MS = 15_000;
 export const PYTHON_IDLE_MS = 5 * 60_000;
@@ -11,6 +16,7 @@ export type PythonRunInput = {
 	filename?: string;
 	files?: { path: string; content: string }[];
 	onOutput?: (stream: 'stdout' | 'stderr', text: string) => void;
+	onInput?: () => void;
 };
 
 export type PythonRunResult = {
@@ -33,6 +39,7 @@ type Job = {
 	generation: number;
 	stdout: string;
 	stderr: string;
+	inputBuffer?: SharedArrayBuffer;
 };
 
 let worker: Worker | undefined;
@@ -112,6 +119,14 @@ function finish(result: PythonRunResult) {
 	armIdle();
 }
 
+function armJobTimeout(job: Job) {
+	if (job.timer) clearTimeout(job.timer);
+	job.timer = setTimeout(() => {
+		if (active?.id !== job.id) return;
+		stopPython(`Ausführung nach ${RUN_TIMEOUT_MS / 1_000} Sekunden gestoppt.`);
+	}, RUN_TIMEOUT_MS);
+}
+
 function handleMessage(message: PythonWorkerMessage) {
 	if (message.type === 'status') {
 		if (message.version) version = message.version;
@@ -137,12 +152,20 @@ function handleMessage(message: PythonWorkerMessage) {
 		active.input.onOutput?.(message.stream, message.text);
 		return;
 	}
+	if (message.type === 'input') {
+		if (!active || message.id !== active.id) return;
+		active.inputBuffer = message.buffer;
+		if (active.timer) clearTimeout(active.timer);
+		active.timer = undefined;
+		active.input.onInput?.();
+		return;
+	}
 	if (!active || message.id !== active.id) return;
 	const job = active;
 	finish(
 		message.type === 'result'
 			? {
-					stdout: message.stdout,
+					stdout: job.stdout.trimEnd(),
 					stderr: message.stderr,
 					durationMs: message.durationMs,
 					failed: false
@@ -181,10 +204,7 @@ function pump() {
 	clearIdle();
 	status = 'running';
 	emit();
-	next.timer = setTimeout(() => {
-		if (active?.id !== next.id) return;
-		stopPython(`Ausführung nach ${RUN_TIMEOUT_MS / 1_000} Sekunden gestoppt.`);
-	}, RUN_TIMEOUT_MS);
+	armJobTimeout(next);
 	worker.postMessage({
 		type: 'run',
 		id: next.id,
@@ -199,7 +219,7 @@ function ensureWorker() {
 	status = 'loading';
 	emit();
 	const mine = generation;
-	const next = new Worker(new URL('$lib/runner/python.worker.ts', import.meta.url), {
+	const next = new Worker(new URL('./python.worker.ts', import.meta.url), {
 		type: 'module'
 	});
 	worker = next;
@@ -242,6 +262,27 @@ export function runPython(input: PythonRunInput): Promise<PythonRunResult> {
 		ensureWorker();
 		pump();
 	});
+}
+
+export function submitPythonInput(value: string): boolean {
+	const job = active;
+	const buffer = job?.inputBuffer;
+	if (!job || !buffer) return false;
+	const encoded = new TextEncoder().encode(value);
+	if (encoded.length > PYTHON_INPUT_MAX_BYTES) return false;
+
+	const header = new Int32Array(buffer, 0, 2);
+	new Uint8Array(buffer, PYTHON_INPUT_HEADER_BYTES, encoded.length).set(encoded);
+	Atomics.store(header, 1, encoded.length);
+	job.inputBuffer = undefined;
+	Atomics.store(header, 0, 1);
+	Atomics.notify(header, 0);
+
+	const echoedInput = `${value}\n`;
+	job.stdout = clipText(job.stdout + echoedInput);
+	job.input.onOutput?.('stdout', echoedInput);
+	armJobTimeout(job);
+	return true;
 }
 
 export function stopPython(message = 'Ausführung gestoppt.') {

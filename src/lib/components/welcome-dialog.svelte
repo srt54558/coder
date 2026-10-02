@@ -3,10 +3,10 @@
 	import Flower2 from '@lucide/svelte/icons/flower-2';
 	import Moon from '@lucide/svelte/icons/moon';
 	import Sun from '@lucide/svelte/icons/sun';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import type { AppTheme } from '$lib/theme';
-	import { WELCOME_FILES, WELCOME_LANGUAGES, type WelcomeLanguage } from '$lib/workspace/model';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import type { AppTheme } from '#lib/theme.js';
+	import { WELCOME_FILES, WELCOME_LANGUAGES, type WelcomeLanguage } from '#lib/workspace/model.js';
 
 	let {
 		open,
@@ -73,7 +73,7 @@
 				<div class="grid grid-cols-2 gap-2">
 					{#each WELCOME_LANGUAGES as id (id)}
 						<label
-							class="border-input has-checked:border-ring has-checked:bg-muted flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm"
+							class="flex cursor-pointer items-center gap-2 rounded-md border border-input px-3 py-2 text-sm has-checked:border-ring has-checked:bg-muted"
 						>
 							<input type="radio" name="welcome-language" value={id} bind:group={language} />
 							{WELCOME_FILES[id].label}

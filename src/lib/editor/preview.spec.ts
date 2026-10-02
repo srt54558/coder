@@ -33,7 +33,10 @@ describe('html preview', () => {
 	});
 
 	it('wraps a fragment so style and script still belong to the page', () => {
-		const html = previewDocument('<h1>Hi</h1><style>h1{color:blue}</style><script>console.log(1)</script>', 2);
+		const html = previewDocument(
+			'<h1>Hi</h1><style>h1{color:blue}</style><script>console.log(1)</script>',
+			2
+		);
 		expect(html.startsWith('<!DOCTYPE html>')).toBe(true);
 		expect(html).toContain('<h1>Hi</h1>');
 		expect(html).toContain('<style>h1{color:blue}</style>');
@@ -41,14 +44,22 @@ describe('html preview', () => {
 	});
 
 	it('accepts only the current preview generation', () => {
-		expect(readPreviewMessage({ source: 'kplus-preview', token: 3, level: 'log', text: ' hi ' }, 3)).toEqual({
+		expect(
+			readPreviewMessage({ source: 'kplus-preview', token: 3, level: 'log', text: ' hi ' }, 3)
+		).toEqual({
 			level: 'log',
 			text: 'hi'
 		});
-		expect(readPreviewMessage({ source: 'kplus-preview', token: 2, level: 'log', text: 'alt' }, 3)).toBeNull();
+		expect(
+			readPreviewMessage({ source: 'kplus-preview', token: 2, level: 'log', text: 'alt' }, 3)
+		).toBeNull();
 		expect(readPreviewMessage({ source: 'other', token: 3, text: 'nein' }, 3)).toBeNull();
-		expect(readPreviewMessage({ source: 'kplus-preview', token: 3, kind: 'open', url: 'a.html' }, 3)).toBeNull();
-		expect(readPreviewRequest({ source: 'kplus-preview', token: 3, kind: 'open', url: 'a.html' }, 3)).toEqual({
+		expect(
+			readPreviewMessage({ source: 'kplus-preview', token: 3, kind: 'open', url: 'a.html' }, 3)
+		).toBeNull();
+		expect(
+			readPreviewRequest({ source: 'kplus-preview', token: 3, kind: 'open', url: 'a.html' }, 3)
+		).toEqual({
 			kind: 'open',
 			url: 'a.html'
 		});
@@ -77,15 +88,20 @@ describe('html preview', () => {
 	});
 
 	it('maps a preview error line back onto the editor', () => {
-		const page = '<!DOCTYPE html>\n<html>\n<head></head>\n<body>\n<h1>Hallo</h1>\n</body>\n</html>\n';
+		const page =
+			'<!DOCTYPE html>\n<html>\n<head></head>\n<body>\n<h1>Hallo</h1>\n</body>\n</html>\n';
 		const full = previewDocument(page, 1);
 		const fullLine = full.split('\n').findIndex((line) => line.includes('<h1>Hallo</h1>')) + 1;
 		expect(editorLineForPreview(page, 1, fullLine)).toBe(5);
 		const fragment = previewDocument('<h1>Hallo</h1>', 1);
-		const fragmentLine = fragment.split('\n').findIndex((line) => line.includes('<h1>Hallo</h1>')) + 1;
+		const fragmentLine =
+			fragment.split('\n').findIndex((line) => line.includes('<h1>Hallo</h1>')) + 1;
 		expect(editorLineForPreview('<h1>Hallo</h1>', 1, fragmentLine)).toBe(1);
 		expect(
-			readPreviewMessage({ source: 'kplus-preview', token: 3, level: 'error', text: 'x', line: 4, column: 2 }, 3)
+			readPreviewMessage(
+				{ source: 'kplus-preview', token: 3, level: 'error', text: 'x', line: 4, column: 2 },
+				3
+			)
 		).toEqual({ level: 'error', text: 'x', line: 4, column: 2 });
 	});
 
@@ -104,9 +120,12 @@ describe('html preview', () => {
 		expect(line - offset).toBe(1);
 		expect(doc).toContain('kind:"done"');
 		expect(readPreviewDone({ source: 'kplus-preview', token: 7, kind: 'done' }, 7)).toBe(true);
-		expect(readPreviewMessage({ source: 'kplus-preview', token: 7, kind: 'done', level: 'log', text: '.' }, 7)).toBe(
-			null
-		);
+		expect(
+			readPreviewMessage(
+				{ source: 'kplus-preview', token: 7, kind: 'done', level: 'log', text: '.' },
+				7
+			)
+		).toBe(null);
 	});
 
 	it('resolves a project path from a folder and refuses to leave the project', () => {

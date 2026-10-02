@@ -42,7 +42,24 @@ print("Python-Zeit:", datetime.now().strftime("%H:%M:%S"))
 `;
 
 export function createId(prefix: 'file' | 'folder'): string {
-	return `${prefix}-${crypto.randomUUID()}`;
+	let uuid: string;
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		uuid = crypto.randomUUID();
+	} else {
+		const bytes = new Uint8Array(16);
+		if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+			crypto.getRandomValues(bytes);
+		} else {
+			for (let index = 0; index < bytes.length; index += 1) {
+				bytes[index] = Math.floor(Math.random() * 256);
+			}
+		}
+		bytes[6] = (bytes[6] & 0x0f) | 0x40;
+		bytes[8] = (bytes[8] & 0x3f) | 0x80;
+		const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+		uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+	}
+	return `${prefix}-${uuid}`;
 }
 
 export function createInitialWorkspace(legacyDraft?: string | null): WorkspaceSnapshot {
@@ -302,6 +319,21 @@ export function projectFiles(snapshot: WorkspaceSnapshot): { path: string; conte
 	}));
 }
 
+export function emptyCollaborationWorkspace(
+	layout: WorkspaceSnapshot['layout']
+): WorkspaceSnapshot {
+	return {
+		version: WORKSPACE_VERSION,
+		folders: [{ id: ROOT_FOLDER_ID, name: 'Projekt', parentId: null }],
+		files: [],
+		openFileIds: [],
+		activeFileId: '',
+		selectedFolderId: ROOT_FOLDER_ID,
+		layout,
+		welcomed: true
+	};
+}
+
 export function sanitizeWorkspace(value: WorkspaceSnapshot): WorkspaceSnapshot {
 	const folders = value.folders?.length
 		? value.folders
@@ -311,10 +343,9 @@ export function sanitizeWorkspace(value: WorkspaceSnapshot): WorkspaceSnapshot {
 	if (!files.length) return createInitialWorkspace();
 	const validFileIds = new Set(files.map((file) => file.id));
 	const openFileIds = (value.openFileIds ?? []).filter((id) => validFileIds.has(id));
-	const activeFileId = validFileIds.has(value.activeFileId)
+	const activeFileId = openFileIds.includes(value.activeFileId)
 		? value.activeFileId
-		: (openFileIds[0] ?? files[0].id);
-	if (!openFileIds.includes(activeFileId)) openFileIds.push(activeFileId);
+		: (openFileIds[0] ?? '');
 	return {
 		version: WORKSPACE_VERSION,
 		folders,
@@ -411,7 +442,7 @@ function siblingFileNames(
 		.map((file) => file.name);
 }
 
-function acceptedFileName(value: string): string | null {
+export function acceptedFileName(value: string): string | null {
 	const normalized = normalizeName(value);
 	if (!normalized || normalized === '.' || normalized === '..') return null;
 	if (newFileNameError(normalized)) return null;
@@ -463,11 +494,13 @@ export function openFile(snapshot: WorkspaceSnapshot, fileId: string): Workspace
 }
 
 export function closeFile(snapshot: WorkspaceSnapshot, fileId: string): WorkspaceSnapshot {
-	if (snapshot.openFileIds.length <= 1 || !snapshot.openFileIds.includes(fileId)) return snapshot;
+	if (!snapshot.openFileIds.includes(fileId)) return snapshot;
 	const index = snapshot.openFileIds.indexOf(fileId);
 	const openFileIds = snapshot.openFileIds.filter((id) => id !== fileId);
 	const activeFileId =
-		snapshot.activeFileId === fileId ? openFileIds[Math.max(0, index - 1)] : snapshot.activeFileId;
+		snapshot.activeFileId === fileId
+			? (openFileIds[Math.max(0, index - 1)] ?? '')
+			: snapshot.activeFileId;
 	return { ...snapshot, openFileIds, activeFileId };
 }
 
@@ -553,6 +586,31 @@ export function renameFolder(
 	};
 }
 
+export function moveFileToFolder(
+	snapshot: WorkspaceSnapshot,
+	fileId: string,
+	folderId: string
+): WorkspaceSnapshot {
+	const file = snapshot.files.find((item) => item.id === fileId);
+	if (!file || !snapshot.folders.some((folder) => folder.id === folderId)) return snapshot;
+	if (file.folderId === folderId) {
+		if (snapshot.selectedFolderId === folderId && snapshot.activeFileId === fileId) return snapshot;
+		return { ...snapshot, selectedFolderId: folderId, activeFileId: fileId };
+	}
+	const taken = siblingFileNames(snapshot, folderId).some(
+		(name) => name.toLocaleLowerCase('de') === file.name.toLocaleLowerCase('de')
+	);
+	if (taken) return snapshot;
+	return {
+		...snapshot,
+		files: snapshot.files.map((item) =>
+			item.id === fileId ? { ...item, folderId, updatedAt: Date.now() } : item
+		),
+		selectedFolderId: folderId,
+		activeFileId: fileId
+	};
+}
+
 export function renameFile(
 	snapshot: WorkspaceSnapshot,
 	fileId: string,
@@ -576,12 +634,12 @@ export function deleteFile(snapshot: WorkspaceSnapshot, fileId: string): Workspa
 	if (snapshot.files.length <= 1 || !snapshot.files.some((file) => file.id === fileId))
 		return snapshot;
 	const files = snapshot.files.filter((file) => file.id !== fileId);
-	let openFileIds = snapshot.openFileIds.filter((id) => id !== fileId);
-	let activeFileId = snapshot.activeFileId === fileId ? '' : snapshot.activeFileId;
-	if (!files.some((file) => file.id === activeFileId)) {
-		activeFileId = openFileIds.find((id) => files.some((file) => file.id === id)) ?? files[0].id;
+	const index = snapshot.openFileIds.indexOf(fileId);
+	const openFileIds = snapshot.openFileIds.filter((id) => id !== fileId);
+	let activeFileId = snapshot.activeFileId;
+	if (activeFileId === fileId || !files.some((file) => file.id === activeFileId)) {
+		activeFileId = openFileIds[Math.max(0, index - 1)] ?? '';
 	}
-	if (!openFileIds.includes(activeFileId)) openFileIds = [activeFileId, ...openFileIds];
 	return { ...snapshot, files, openFileIds, activeFileId };
 }
 
@@ -604,10 +662,9 @@ export function deleteFolder(snapshot: WorkspaceSnapshot, folderId: string): Wor
 	const removedFileIds = new Set(
 		snapshot.files.filter((file) => removeIds.has(file.folderId)).map((file) => file.id)
 	);
-	let openFileIds = snapshot.openFileIds.filter((id) => !removedFileIds.has(id));
+	const openFileIds = snapshot.openFileIds.filter((id) => !removedFileIds.has(id));
 	let activeFileId = removedFileIds.has(snapshot.activeFileId) ? '' : snapshot.activeFileId;
-	if (!files.some((file) => file.id === activeFileId)) activeFileId = files[0].id;
-	if (!openFileIds.includes(activeFileId)) openFileIds = [activeFileId, ...openFileIds];
+	if (!openFileIds.includes(activeFileId)) activeFileId = openFileIds[0] ?? '';
 	const selectedFolderId = removeIds.has(snapshot.selectedFolderId)
 		? (folder.parentId ?? ROOT_FOLDER_ID)
 		: snapshot.selectedFolderId;

@@ -499,9 +499,11 @@ test('asks for wwschool login from files, then stays local for this session', as
 	const login = page.getByRole('dialog', { name: 'Bei wwschool anmelden' });
 	await expect(login).toBeVisible();
 	await expect(
-		login.getByText('Dein Workspace bleibt lokal gespeichert und wird mit wwschool abgeglichen.')
+		login.getByText(
+			'Deine Dateien bleiben in diesem Browser. Speichern legt sie im Ordner coder-kplus in deiner Dateiablage ab.'
+		)
 	).toBeVisible();
-	await expect(login.getByLabel('E-Mail-Adresse')).toHaveValue('kri.avramovic@stg-segeberg.de');
+	await expect(login.getByLabel('E-Mail-Adresse')).toBeVisible();
 	const password = login.getByLabel('Passwort');
 	await expect(password).toHaveAttribute('type', 'password');
 	await password.fill('feldtest');
@@ -531,22 +533,215 @@ test('asks for wwschool login from files, then stays local for this session', as
 	await expect(login).toBeHidden();
 });
 
-test('opens shared code unsaved and saves it through the files manager', async ({ page }) => {
+test('opens shared code unsaved; Speichern asks for login, download marks it saved', async ({
+	page
+}) => {
 	await openCoder(page);
 	await page.goto(`/?${IMPORT_PARAM}#${encodeCode('print("geteilt")')}`);
 	await expect(page.getByRole('tab', { name: /geteilt\.py/u })).toBeVisible();
 	await expect(page.getByText('Nicht gespeichert', { exact: true })).toBeVisible();
 	await expect(page.locator('.cm-content')).toContainText('print("geteilt")');
-	await page.getByRole('button', { name: 'Geteilte Datei speichern' }).click();
+	await page.getByRole('button', { name: 'Speichern' }).click();
 	const login = page.getByRole('dialog', { name: 'Bei wwschool anmelden' });
+	await expect(login).toBeVisible();
+	await expect(login.getByRole('button', { name: 'Lokal weiterarbeiten' })).toHaveCount(0);
+	await page.keyboard.press('Escape');
+	await expect(login).toBeHidden();
+
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'geteilt.py herunterladen' }).click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toBe('geteilt.py');
+	await expect(page.getByText('Nicht gespeichert', { exact: true })).toHaveCount(0);
+	await expect(page.getByRole('tab', { name: /geteilt\.py/u }).locator('.dirty-mark')).toHaveCount(
+		0
+	);
+});
+
+function davCollections(selfHref: string, children: { href: string; name: string }[] = []) {
+	const row = (href: string, name: string) =>
+		`<D:response><D:href>${href}</D:href><D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype><D:displayname>${name}</D:displayname></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>`;
+	return `<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">${row(selfHref, 'self')}${children
+		.map((child) => row(child.href, child.name))
+		.join('')}</D:multistatus>`;
+}
+
+test('uploads the open file into coder-kplus after choosing a folder', async ({ page }) => {
+	const puts: { url: string; body: string }[] = [];
+	const cors = {
+		'Access-Control-Allow-Origin': '*',
+		'Access-Control-Allow-Headers': 'Depth, Destination, Overwrite, User-Agent, Authorization',
+		'Access-Control-Allow-Methods': 'GET, HEAD, PUT, MKCOL, PROPFIND, OPTIONS'
+	};
+	await page.route(/https:\/\/www\.wwschool\.de\//, async (route) => {
+		const request = route.request();
+		const method = request.method();
+		const url = request.url();
+		if (method === 'OPTIONS') {
+			await route.fulfill({ status: 204, headers: cors });
+			return;
+		}
+		if (method === 'PROPFIND' && url === 'https://www.wwschool.de/webdav.php/') {
+			await route.fulfill({
+				status: 207,
+				headers: { ...cors, 'Content-Type': 'application/xml' },
+				body: davCollections('/webdav.php/', [
+					{ href: '/webdav.php/person@example.test/', name: 'Person' }
+				])
+			});
+			return;
+		}
+		if (
+			method === 'PROPFIND' &&
+			url === 'https://www.wwschool.de/webdav.php/person@example.test/'
+		) {
+			await route.fulfill({
+				status: 207,
+				headers: { ...cors, 'Content-Type': 'application/xml' },
+				body: davCollections('/webdav.php/person@example.test/', [
+					{ href: '/webdav.php/person@example.test/storage/', name: 'storage' }
+				])
+			});
+			return;
+		}
+		if (
+			method === 'PROPFIND' &&
+			url === 'https://www.wwschool.de/webdav.php/person@example.test/storage/'
+		) {
+			await route.fulfill({
+				status: 207,
+				headers: { ...cors, 'Content-Type': 'application/xml' },
+				body: davCollections('/webdav.php/person@example.test/storage/')
+			});
+			return;
+		}
+		if (
+			method === 'MKCOL' &&
+			url === 'https://www.wwschool.de/webdav.php/person@example.test/storage/coder-kplus/'
+		) {
+			await route.fulfill({ status: 201, headers: cors });
+			return;
+		}
+		if (
+			method === 'PROPFIND' &&
+			url === 'https://www.wwschool.de/webdav.php/person@example.test/storage/coder-kplus/'
+		) {
+			await route.fulfill({
+				status: 207,
+				headers: { ...cors, 'Content-Type': 'application/xml' },
+				body: davCollections('/webdav.php/person@example.test/storage/coder-kplus/')
+			});
+			return;
+		}
+		if (method === 'PUT') {
+			puts.push({ url, body: request.postData() ?? '' });
+			await route.fulfill({ status: 201, headers: cors });
+			return;
+		}
+		await route.fulfill({ status: 404, headers: cors });
+	});
+
+	await openCoder(page);
+	await expect(page.getByRole('button', { name: 'Speichern' })).toBeVisible();
+	await page.getByRole('button', { name: 'Einstellungen' }).click();
+	await page.getByRole('button', { name: 'Bei wwschool anmelden' }).click();
+	const login = page.getByRole('dialog', { name: 'Bei wwschool anmelden' });
+	await login.getByLabel('E-Mail-Adresse').fill('person@example.test');
+	await login.getByLabel('Passwort').fill('test-only');
+	await login.getByRole('button', { name: 'Anmelden', exact: true }).click();
+	await expect(login).toBeHidden();
+	await expect(page.getByRole('status')).toContainText('coder-kplus');
+
+	await page.getByRole('button', { name: 'Speichern' }).click();
+	const saveAs = page.getByRole('dialog', { name: 'Dateien' });
+	await expect(saveAs).toBeVisible();
+	await expect(saveAs.getByLabel('Name')).toHaveValue('main.py');
+	await expect(saveAs.getByRole('button', { name: 'Abbrechen' })).toBeVisible();
+	await saveAs.getByRole('button', { name: 'Speichern' }).click();
+	await expect(page.getByRole('status')).toContainText('Nach wwschool gelegt: coder-kplus/main.py');
+	await expect(saveAs).toBeHidden();
+	await expect(page.getByRole('tab', { name: /main\.py/u }).locator('.dirty-mark')).toHaveCount(0);
+	expect(puts.length).toBe(1);
+	expect(puts[0]?.url).toBe(
+		'https://www.wwschool.de/webdav.php/person@example.test/storage/coder-kplus/main.py'
+	);
+	expect(puts[0]?.body).toContain('Hallo');
+});
+
+test('shows Speichern always, asks for login, and treats a file download as saved', async ({
+	page
+}) => {
+	await openCoder(page);
+	await expect(page.getByRole('button', { name: 'Speichern' })).toBeVisible();
+	await expect(page.getByRole('tab', { name: /main\.py/u }).locator('.dirty-mark')).toBeVisible();
+
+	await page.getByRole('button', { name: 'Speichern' }).click();
+	const login = page.getByRole('dialog', { name: 'Bei wwschool anmelden' });
+	await expect(login).toBeVisible();
+	await expect(login.getByRole('button', { name: 'Lokal weiterarbeiten' })).toHaveCount(0);
+	await page.keyboard.press('Escape');
+	await expect(login).toBeHidden();
+
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'main.py herunterladen' }).click();
+	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toBe('main.py');
+	await expect(page.getByRole('tab', { name: /main\.py/u }).locator('.dirty-mark')).toHaveCount(0);
+
+	await setEditor(page, 'print("nochmal")\n');
+	await expect(page.getByRole('tab', { name: /main\.py/u }).locator('.dirty-mark')).toBeVisible();
+	await page.getByRole('button', { name: 'Dateien' }).click();
 	await expect(login).toBeVisible();
 	await login.getByRole('button', { name: 'Lokal weiterarbeiten' }).click();
 	const files = page.getByRole('dialog', { name: 'Dateien' });
 	await expect(files).toBeVisible();
-	await expect(files.getByText('Ordner wählen, dann hier speichern.')).toBeVisible();
-	await files.getByRole('button', { name: 'Hier speichern' }).click();
-	await expect(files).toBeHidden();
-	await expect(page.getByRole('tab', { name: 'geteilt.py', exact: true })).toBeVisible();
-	await expect(page.getByText('Nicht gespeichert', { exact: true })).toHaveCount(0);
-	await expect(page.locator('.cm-content')).toContainText('print("geteilt")');
+	const downloadPromise2 = page.waitForEvent('download');
+	await files.getByRole('button', { name: 'Exportieren' }).click();
+	const exported = await downloadPromise2;
+	expect(exported.suggestedFilename()).toMatch(/main\.py/u);
+	await expect(page.getByRole('tab', { name: /main\.py/u }).locator('.dirty-mark')).toBeVisible();
+});
+
+test('keeps open tabs and unsaved marks after a reload and skips the welcome dialog', async ({
+	page
+}) => {
+	await openCoder(page);
+	await setEditor(page, 'print("bleibt")\n');
+	await createFile(page, 'notiz.txt');
+	await setEditor(page, 'lokal\n');
+	await expect(page.getByRole('tab', { name: 'notiz.txt' })).toBeVisible();
+	await page.reload();
+	await expect(page.getByRole('dialog', { name: 'Willkommen' })).toHaveCount(0);
+	await expect(page.getByRole('tab', { name: 'main.py' })).toBeVisible();
+	await expect(page.getByRole('tab', { name: 'notiz.txt' })).toBeVisible();
+	await expect(page.locator('.cm-content')).toContainText('lokal');
+	await expect(page.getByRole('tab', { name: /notiz\.txt/u }).locator('.dirty-mark')).toBeVisible();
+	await page.getByRole('tab', { name: 'main.py' }).click();
+	await expect(page.locator('.cm-content')).toContainText('print("bleibt")');
+	await expect(page.getByRole('tab', { name: /main\.py/u }).locator('.dirty-mark')).toBeVisible();
+});
+
+test('asks before closing an unsaved tab and shows an empty state afterward', async ({ page }) => {
+	await openCoder(page);
+	await page.getByRole('button', { name: 'main.py schließen' }).click();
+	const confirm = page.getByRole('alertdialog', { name: 'Ungespeicherte Datei schließen?' });
+	await expect(confirm).toBeVisible();
+	await confirm.getByRole('button', { name: 'Abbrechen' }).click();
+	await expect(page.getByRole('tab', { name: 'main.py' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'main.py schließen' }).click();
+	await expect(confirm).toBeVisible();
+	await confirm.getByRole('button', { name: 'Schließen' }).click();
+	await expect(page.getByRole('tab', { name: 'main.py' })).toHaveCount(0);
+	await expect(page.getByText('Keine Datei geöffnet')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Datei erstellen' })).toBeVisible();
+
+	await page.reload();
+	await expect(page.getByRole('dialog', { name: 'Willkommen' })).toHaveCount(0);
+	await expect(page.getByText('Keine Datei geöffnet')).toBeVisible();
+	await page.getByRole('button', { name: 'Datei erstellen' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Neue Datei' });
+	await dialog.getByRole('textbox', { name: 'Name' }).fill('neu.py');
+	await dialog.getByRole('button', { name: 'Anlegen' }).click();
+	await expect(page.getByRole('tab', { name: 'neu.py' })).toBeVisible();
 });

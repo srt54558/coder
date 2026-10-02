@@ -1,16 +1,13 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import { parseWorkspaceArchive, WORKSPACE_ARCHIVE_NAME, workspaceExport } from './archive';
 import type { WorkspaceSnapshot } from './model';
 
 const WEBDAV_ROOT = 'https://www.wwschool.de/webdav.php';
 const WEBDAV_ROOT_HREF = `${WEBDAV_ROOT}/`;
-const WORKSPACE_FILENAME = WORKSPACE_ARCHIVE_NAME;
-const MAX_WORKSPACE_BYTES = 20_000_000;
+export const CODER_FOLDER_NAME = 'coder-kplus';
+const MAX_FILE_BYTES = 20_000_000;
 const DATABASE_NAME = 'kplus-python-webdav';
 const STORE_NAME = 'private-data';
 const SESSION_CREDENTIALS_KEY = 'kplus-coder-webdav-session';
-const PROPFIND_ETAG = `<?xml version="1.0" encoding="utf-8"?>
-<D:propfind xmlns:D="DAV:"><D:prop><D:getetag/></D:prop></D:propfind>`;
 
 interface PrivateRecord {
 	key: string;
@@ -32,24 +29,28 @@ export interface WebDavCredentials {
 export interface WebDavConnection {
 	personalHref: string;
 	personalName: string;
-	workspaceHref: string;
+	projectHref: string;
 }
 
-export interface WebDavSyncState extends WebDavConnection {
-	lastSyncedHash: string;
-	lastSyncedEtag?: string;
-}
+export type WebDavSyncState = WebDavConnection;
 
-export interface RemoteWorkspace {
-	snapshot: WorkspaceSnapshot;
-	hash: string;
-	etag: string | null;
+export interface WebDavTreeFolder {
+	id: string;
+	name: string;
+	parentId: string | null;
 	href: string;
 }
 
-export interface RemoteProbe {
-	exists: boolean;
-	etag: string | null;
+export interface WebDavTreeFile {
+	id: string;
+	name: string;
+	folderId: string;
+	href: string;
+}
+
+export interface WebDavTree {
+	folders: WebDavTreeFolder[];
+	files: WebDavTreeFile[];
 }
 
 export class WebDavError extends Error {
@@ -59,16 +60,6 @@ export class WebDavError extends Error {
 	) {
 		super(message);
 		this.name = 'WebDavError';
-	}
-}
-
-export class WebDavConflictError extends Error {
-	constructor(
-		readonly remote: RemoteWorkspace | null,
-		message = 'Der Stand auf dem Server hat sich inzwischen geändert.'
-	) {
-		super(message);
-		this.name = 'WebDavConflictError';
 	}
 }
 
@@ -189,7 +180,23 @@ export async function clearWebDavCredentials(): Promise<void> {
 }
 
 export async function loadWebDavSyncState(): Promise<WebDavSyncState | null> {
-	return readPrivateRecord<WebDavSyncState>('sync-state');
+	const stored = await readPrivateRecord<Partial<WebDavSyncState>>('sync-state');
+	if (
+		!stored ||
+		typeof stored.personalHref !== 'string' ||
+		typeof stored.personalName !== 'string' ||
+		typeof stored.projectHref !== 'string' ||
+		!stored.personalHref ||
+		!stored.personalName ||
+		!stored.projectHref
+	) {
+		return null;
+	}
+	return {
+		personalHref: stored.personalHref,
+		personalName: stored.personalName,
+		projectHref: stored.projectHref
+	};
 }
 
 export async function saveWebDavSyncState(state: WebDavSyncState): Promise<void> {
@@ -228,6 +235,46 @@ function childFileHref(folderHref: string, filename: string): string {
 	return new URL(filename, folderUrl(folderHref)).href;
 }
 
+function hasControlCharacter(value: string): boolean {
+	for (const character of value) {
+		const code = character.codePointAt(0);
+		if (code !== undefined && (code < 0x20 || code === 0x7f)) return true;
+	}
+	return false;
+}
+
+function childCollectionHref(parentHref: string, name: string): string {
+	if (
+		!name ||
+		name.trim() !== name ||
+		name === '.' ||
+		name === '..' ||
+		name.includes('/') ||
+		name.includes('\\') ||
+		hasControlCharacter(name)
+	) {
+		throw new WebDavError('Ungültiger Ordnername.');
+	}
+	return folderUrl(new URL(`${name}/`, folderUrl(parentHref)).href).href;
+}
+
+function assertProjectFolder(connection: WebDavConnection, parentHref: string): string {
+	const root = folderUrl(connection.projectHref);
+	const parent = folderUrl(parentHref);
+	if (
+		parent.origin !== root.origin ||
+		(parent.href !== root.href && !parent.pathname.startsWith(root.pathname))
+	) {
+		throw new WebDavError('Der Ordner liegt außerhalb des K+ Coder-Projektordners.');
+	}
+	return parent.href;
+}
+
+export function coderProjectPath(relativeDir: string, filename: string): string {
+	const dir = relativeDir.replace(/^\/+|\/+$/gu, '');
+	return dir ? `${CODER_FOLDER_NAME}/${dir}/${filename}` : `${CODER_FOLDER_NAME}/${filename}`;
+}
+
 async function request(
 	credentials: WebDavCredentials,
 	url: string,
@@ -247,7 +294,7 @@ async function request(
 		});
 	} catch {
 		throw new WebDavError(
-			'wwschool ist momentan nicht erreichbar. Die lokalen Dateien bleiben erhalten.'
+			'wwschool ist momentan nicht erreichbar. Die Dateien bleiben im offenen Workspace erhalten.'
 		);
 	}
 }
@@ -260,12 +307,31 @@ function friendlyStatus(status: number, action: string): string {
 	return `wwschool konnte ${action} nicht ausführen (HTTP ${status}).`;
 }
 
-function xmlValue(element: Element, name: string): string {
-	return element.getElementsByTagNameNS('DAV:', name).item(0)?.textContent?.trim() ?? '';
+function decodeXmlText(value: string): string {
+	return value
+		.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gu, '$1')
+		.replace(/&lt;/gu, '<')
+		.replace(/&gt;/gu, '>')
+		.replace(/&quot;/gu, '"')
+		.replace(/&apos;/gu, "'")
+		.replace(/&amp;/gu, '&')
+		.trim();
 }
 
-function xmlResponses(xml: Document): Element[] {
-	return Array.from(xml.getElementsByTagNameNS('DAV:', 'response'));
+function xmlTagText(block: string, localName: string): string {
+	const pattern = new RegExp(
+		`<(?:[A-Za-z0-9]+:)?${localName}\\b[^>]*>([\\s\\S]*?)</(?:[A-Za-z0-9]+:)?${localName}>`,
+		'i'
+	);
+	return decodeXmlText(pattern.exec(block)?.[1] ?? '');
+}
+
+function davResponseBlocks(xml: string): string[] {
+	return xml.match(/<(?:[A-Za-z0-9]+:)?response\b[\s\S]*?<\/(?:[A-Za-z0-9]+:)?response>/gi) ?? [];
+}
+
+function responseIsCollection(block: string): boolean {
+	return /<(?:[A-Za-z0-9]+:)?resourcetype\b[\s\S]*?<(?:[A-Za-z0-9]+:)?collection\b/i.test(block);
 }
 
 function decodeSegment(value: string): string {
@@ -276,11 +342,15 @@ function decodeSegment(value: string): string {
 	}
 }
 
-function listedCollections(xml: Document, scopeHref: string): { href: string; name: string }[] {
+function listedResources(
+	xml: string,
+	scopeHref: string
+): { href: string; name: string; collection: boolean }[] {
 	const scope = checkedUrl(scopeHref);
 	const scopePath = scope.pathname.replace(/\/+$/u, '');
-	const rows = xmlResponses(xml).flatMap((response) => {
-		const href = xmlValue(response, 'href');
+	return davResponseBlocks(xml).flatMap((response) => {
+		const href = xmlTagText(response, 'href');
+		if (!href) return [];
 		const listedUrl = new URL(href, scope);
 		if (
 			listedUrl.origin === scope.origin &&
@@ -289,19 +359,22 @@ function listedCollections(xml: Document, scopeHref: string): { href: string; na
 			return [];
 		}
 		const url = checkedUrl(listedUrl.href, scope.href);
-		const isCollection = response
-			.getElementsByTagNameNS('DAV:', 'resourcetype')
-			.item(0)
-			?.getElementsByTagNameNS('DAV:', 'collection').length;
-		if (!isCollection) return [];
+		const collection = responseIsCollection(response);
+		const name = xmlTagText(response, 'displayname') || pathTail(url.href);
 		return [
 			{
-				href: url.href.endsWith('/') ? url.href : `${url.href}/`,
-				name: xmlValue(response, 'displayname')
+				href: collection ? (url.href.endsWith('/') ? url.href : `${url.href}/`) : url.href,
+				name,
+				collection
 			}
 		];
 	});
-	return rows;
+}
+
+function listedCollections(xml: string, scopeHref: string): { href: string; name: string }[] {
+	return listedResources(xml, scopeHref)
+		.filter((row) => row.collection)
+		.map(({ href, name }) => ({ href, name }));
 }
 
 function pathTail(href: string): string {
@@ -313,7 +386,7 @@ export function isPersonalFolderHref(href: string, username: string): boolean {
 	return pathTail(href).toLocaleLowerCase('de') === username.trim().toLocaleLowerCase('de');
 }
 
-function findPersonalCollection(xml: Document, username: string): { href: string; name: string } {
+function findPersonalCollection(xml: string, username: string): { href: string; name: string } {
 	const rows = listedCollections(xml, WEBDAV_ROOT);
 	const matches = rows.filter((row) => isPersonalFolderHref(row.href, username));
 	if (matches.length === 1) return matches[0];
@@ -332,14 +405,7 @@ async function findPersonalStorageCollection(
 			response.status
 		);
 	}
-	let xml: Document;
-	try {
-		xml = new DOMParser().parseFromString(await response.text(), 'application/xml');
-		if (xml.getElementsByTagName('parsererror').length) throw new Error('XML');
-	} catch {
-		throw new WebDavError('wwschool hat eine ungültige Liste persönlicher Ordner zurückgegeben.');
-	}
-	const folders = listedCollections(xml, accountFolder.href);
+	const folders = listedCollections(await response.text(), accountFolder.href);
 	const storage = folders.filter(
 		(folder) => pathTail(folder.href).toLocaleLowerCase('de') === 'storage'
 	);
@@ -350,6 +416,65 @@ async function findPersonalStorageCollection(
 	return accountFolder;
 }
 
+function findNamedCollection(
+	xml: string,
+	parentHref: string,
+	name: string
+): { href: string; name: string } | null {
+	const wanted = name.trim().toLocaleLowerCase('de');
+	const matches = listedCollections(xml, parentHref).filter(
+		(folder) => pathTail(folder.href).toLocaleLowerCase('de') === wanted
+	);
+	if (matches.length > 1) {
+		throw new WebDavError(`Der Ordner ${name} wurde nicht eindeutig erkannt.`);
+	}
+	return matches[0] ?? null;
+}
+
+async function listChildCollections(
+	credentials: WebDavCredentials,
+	folderHref: string
+): Promise<string> {
+	const href = folderUrl(folderHref).href;
+	const response = await request(credentials, href, 'PROPFIND', { Depth: '1' });
+	if (response.status !== 207) {
+		throw new WebDavError(
+			friendlyStatus(response.status, 'die Ordnerliste lesen'),
+			response.status
+		);
+	}
+	return response.text();
+}
+
+async function ensureChildCollection(
+	credentials: WebDavCredentials,
+	parentHref: string,
+	name: string
+): Promise<{ href: string; name: string }> {
+	const parent = folderUrl(parentHref).href;
+	const existing = findNamedCollection(
+		await listChildCollections(credentials, parent),
+		parent,
+		name
+	);
+	if (existing) return existing;
+	const href = childCollectionHref(parent, name);
+	const created = await request(credentials, href, 'MKCOL');
+	if (created.status === 201) return { href, name };
+	if (created.status === 405 || created.status === 409 || created.status === 301) {
+		const again = findNamedCollection(
+			await listChildCollections(credentials, parent),
+			parent,
+			name
+		);
+		if (again) return again;
+	}
+	throw new WebDavError(
+		friendlyStatus(created.status, `den Ordner ${name} anlegen`),
+		created.status
+	);
+}
+
 export async function connectWebDav(credentials: WebDavCredentials): Promise<WebDavConnection> {
 	const response = await request(credentials, WEBDAV_ROOT_HREF, 'PROPFIND', { Depth: '1' });
 	if (response.status !== 207)
@@ -357,104 +482,17 @@ export async function connectWebDav(credentials: WebDavCredentials): Promise<Web
 			friendlyStatus(response.status, 'die Ordnerliste lesen'),
 			response.status
 		);
-	const text = await response.text();
-	let xml: Document;
-	try {
-		xml = new DOMParser().parseFromString(text, 'application/xml');
-		if (xml.getElementsByTagName('parsererror').length) throw new Error('XML');
-	} catch {
-		throw new WebDavError('wwschool hat eine ungültige WebDAV-Ordnerliste zurückgegeben.');
-	}
-	const accountFolder = findPersonalCollection(xml, credentials.username);
+	const accountFolder = findPersonalCollection(await response.text(), credentials.username);
 	const storage = await findPersonalStorageCollection(credentials, accountFolder);
 	const personalUrl = folderUrl(storage.href);
+	const project = await ensureChildCollection(credentials, personalUrl.href, CODER_FOLDER_NAME);
 	return {
 		personalHref: personalUrl.href,
 		personalName:
 			accountFolder.name ||
 			decodeSegment(new URL(accountFolder.href).pathname.split('/').filter(Boolean).at(-1) ?? ''),
-		workspaceHref: childFileHref(personalUrl.href, WORKSPACE_FILENAME)
+		projectHref: project.href
 	};
-}
-
-function responseEtag(response: Response): string | null {
-	return response.headers.get('etag') || response.headers.get('ETag');
-}
-
-async function parseRemoteBody(
-	text: string,
-	href: string,
-	etag: string | null
-): Promise<RemoteWorkspace> {
-	const snapshot = await parseWorkspaceArchive(text);
-	if (!snapshot) {
-		throw new WebDavError('Die Workspace-Datei auf wwschool enthält ungültige Daten.');
-	}
-	return {
-		snapshot,
-		hash: await hashWorkspace(snapshot),
-		etag,
-		href
-	};
-}
-
-async function readRemoteAt(
-	credentials: WebDavCredentials,
-	url: string
-): Promise<RemoteWorkspace | null | 'invalid'> {
-	const response = await request(credentials, url, 'GET');
-	if (response.status === 404) return null;
-	if (!response.ok)
-		throw new WebDavError(
-			friendlyStatus(response.status, 'die Workspace-Datei lesen'),
-			response.status
-		);
-	const bytes = await response.arrayBuffer();
-	if (bytes.byteLength > MAX_WORKSPACE_BYTES) {
-		throw new WebDavError('Die Workspace-Datei auf wwschool ist größer als 20 MB.');
-	}
-	try {
-		return await parseRemoteBody(new TextDecoder().decode(bytes), url, responseEtag(response));
-	} catch {
-		return 'invalid';
-	}
-}
-
-export async function readWebDavWorkspace(
-	credentials: WebDavCredentials,
-	connection: WebDavConnection
-): Promise<RemoteWorkspace | null> {
-	const remote = await readRemoteAt(credentials, connection.workspaceHref);
-	return remote === 'invalid' ? null : remote;
-}
-
-async function probeHref(credentials: WebDavCredentials, url: string): Promise<RemoteProbe | null> {
-	const head = await request(credentials, url, 'HEAD');
-	if (head.status === 404) return { exists: false, etag: null };
-	if (head.ok) return { exists: true, etag: responseEtag(head) };
-	if (head.status === 401 || head.status === 403) {
-		throw new WebDavError(friendlyStatus(head.status, 'die Workspace-Datei prüfen'), head.status);
-	}
-
-	const listed = await request(credentials, url, 'PROPFIND', { Depth: '0' }, PROPFIND_ETAG);
-	if (listed.status === 404) return { exists: false, etag: null };
-	if (listed.status !== 207) return null;
-	let xml: Document;
-	try {
-		xml = new DOMParser().parseFromString(await listed.text(), 'application/xml');
-		if (xml.getElementsByTagName('parsererror').length) throw new Error('XML');
-	} catch {
-		return null;
-	}
-	const etag = xmlValue(xml.documentElement, 'getetag') || null;
-	return { exists: true, etag };
-}
-
-export async function probeWebDavWorkspace(
-	credentials: WebDavCredentials,
-	connection: WebDavConnection
-): Promise<RemoteProbe | null> {
-	return probeHref(credentials, connection.workspaceHref);
 }
 
 async function putText(credentials: WebDavCredentials, url: string, text: string): Promise<void> {
@@ -464,44 +502,155 @@ async function putText(credentials: WebDavCredentials, url: string, text: string
 		throw new WebDavError(friendlyStatus(response.status, 'die Datei speichern'), response.status);
 }
 
-export async function writeWebDavWorkspace(
+export async function writeWebDavProjectFile(
 	credentials: WebDavCredentials,
 	connection: WebDavConnection,
-	snapshot: WorkspaceSnapshot,
-	expectedHash: string | null
-): Promise<RemoteWorkspace> {
-	const current = await readRemoteAt(credentials, connection.workspaceHref);
-	if (current !== 'invalid') {
-		if ((current?.hash ?? null) !== expectedHash) throw new WebDavConflictError(current);
+	relativeDir: string,
+	filename: string,
+	content: string
+): Promise<string> {
+	if (
+		!filename ||
+		filename.trim() !== filename ||
+		filename === '.' ||
+		filename === '..' ||
+		filename.includes('/') ||
+		filename.includes('\\') ||
+		hasControlCharacter(filename)
+	) {
+		throw new WebDavError('Ungültiger Dateiname.');
 	}
-	const text = await workspaceExport(snapshot);
-	if (new TextEncoder().encode(text).byteLength > MAX_WORKSPACE_BYTES) {
-		throw new WebDavError('Die Workspace-Datei ist größer als 20 MB und wurde nicht übertragen.');
+	if (new TextEncoder().encode(content).byteLength > MAX_FILE_BYTES) {
+		throw new WebDavError('Die Datei ist größer als 20 MB und wurde nicht übertragen.');
 	}
-	const nextHash = await hashWorkspace(snapshot);
-	if (current !== 'invalid' && current?.hash === nextHash) return current;
-	await putText(credentials, connection.workspaceHref, text);
-	const verified = await readRemoteAt(credentials, connection.workspaceHref);
-	if (!verified || verified === 'invalid' || verified.hash !== nextHash) {
-		throw new WebDavConflictError(
-			verified === 'invalid' ? null : verified,
-			'wwschool hat während des Speicherns einen anderen Stand erhalten.'
-		);
+	let folder = folderUrl(connection.projectHref).href;
+	const parts = relativeDir
+		.split('/')
+		.map((part) => part.trim())
+		.filter(Boolean);
+	for (const part of parts) {
+		folder = (await ensureChildCollection(credentials, folder, part)).href;
 	}
-	return verified;
+	const href = childFileHref(folder, filename);
+	await putText(credentials, href, content);
+	return href;
 }
 
-export async function sha256(value: string): Promise<string> {
-	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-	return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+export async function createWebDavFolder(
+	credentials: WebDavCredentials,
+	connection: WebDavConnection,
+	parentHref: string,
+	name: string
+): Promise<string> {
+	const parent = assertProjectFolder(connection, parentHref);
+	return (await ensureChildCollection(credentials, parent, name.trim())).href;
 }
 
-export function snapshotHashInput(snapshot: WorkspaceSnapshot): string {
-	return JSON.stringify({ application: 'kplus-coder', version: 1, snapshot });
+export async function createWebDavFile(
+	credentials: WebDavCredentials,
+	connection: WebDavConnection,
+	folderHref: string,
+	filename: string
+): Promise<string> {
+	const parent = assertProjectFolder(connection, folderHref);
+	if (
+		!filename ||
+		filename.trim() !== filename ||
+		filename === '.' ||
+		filename === '..' ||
+		filename.includes('/') ||
+		filename.includes('\\') ||
+		hasControlCharacter(filename)
+	) {
+		throw new WebDavError('Ungültiger Dateiname.');
+	}
+	const href = childFileHref(parent, filename);
+	await putText(credentials, href, '');
+	return href;
 }
 
-export async function hashWorkspace(snapshot: WorkspaceSnapshot): Promise<string> {
-	return sha256(snapshotHashInput(snapshot));
+export function webDavRelativeDir(rootHref: string, folderHref: string): string {
+	const root = folderUrl(rootHref).pathname.replace(/\/+$/u, '');
+	const folder = folderUrl(folderHref).pathname.replace(/\/+$/u, '');
+	if (folder === root) return '';
+	if (!folder.startsWith(`${root}/`)) return '';
+	return folder
+		.slice(root.length + 1)
+		.split('/')
+		.filter(Boolean)
+		.map(decodeSegment)
+		.join('/');
+}
+
+export function emptyWebDavTree(connection: WebDavConnection): WebDavTree {
+	const href = folderUrl(connection.projectHref).href;
+	return {
+		folders: [{ id: href, name: CODER_FOLDER_NAME, parentId: null, href }],
+		files: []
+	};
+}
+
+export async function listWebDavChildren(
+	credentials: WebDavCredentials,
+	folderHref: string
+): Promise<{ folders: { href: string; name: string }[]; files: { href: string; name: string }[] }> {
+	const xml = await listChildCollections(credentials, folderHref);
+	const rows = listedResources(xml, folderHref);
+	return {
+		folders: rows.filter((row) => row.collection).map(({ href, name }) => ({ href, name })),
+		files: rows.filter((row) => !row.collection).map(({ href, name }) => ({ href, name }))
+	};
+}
+
+export async function listWebDavProjectTree(
+	credentials: WebDavCredentials,
+	connection: WebDavConnection
+): Promise<WebDavTree> {
+	const rootHref = folderUrl(connection.projectHref).href;
+	const folders: WebDavTreeFolder[] = [
+		{ id: rootHref, name: CODER_FOLDER_NAME, parentId: null, href: rootHref }
+	];
+	const files: WebDavTreeFile[] = [];
+	const queue = [rootHref];
+	const seen = new Set<string>();
+	while (queue.length) {
+		const href = queue.shift();
+		if (!href || seen.has(href)) continue;
+		seen.add(href);
+		const children = await listWebDavChildren(credentials, href);
+		for (const folder of children.folders) {
+			folders.push({
+				id: folder.href,
+				name: folder.name || pathTail(folder.href),
+				parentId: href,
+				href: folder.href
+			});
+			queue.push(folder.href);
+		}
+		for (const file of children.files) {
+			files.push({
+				id: file.href,
+				name: file.name || pathTail(file.href),
+				folderId: href,
+				href: file.href
+			});
+		}
+	}
+	return { folders, files };
+}
+
+export async function readWebDavFile(
+	credentials: WebDavCredentials,
+	href: string
+): Promise<string> {
+	const response = await request(credentials, href, 'GET');
+	if (!response.ok)
+		throw new WebDavError(friendlyStatus(response.status, 'die Datei lesen'), response.status);
+	const bytes = await response.arrayBuffer();
+	if (bytes.byteLength > MAX_FILE_BYTES) {
+		throw new WebDavError('Die Datei auf wwschool ist größer als 20 MB.');
+	}
+	return new TextDecoder().decode(bytes);
 }
 
 export function isEmptyWorkspace(snapshot: WorkspaceSnapshot): boolean {

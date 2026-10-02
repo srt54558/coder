@@ -1,10 +1,10 @@
 <script lang="ts">
-	import ExampleDemo from '$lib/docs/example-demo.svelte';
-	import Guide from '$lib/docs/guide.svelte';
-	import WebDemo from '$lib/docs/web-demo.svelte';
-	import { LESSONS, type Lesson } from '$lib/docs/lessons';
-	import { WEB_LESSONS } from '$lib/docs/web-lessons';
-	import type { CodeLanguage } from '$lib/workspace/model';
+	import ExampleDemo from '#lib/docs/example-demo.svelte';
+	import Guide from '#lib/docs/guide.svelte';
+	import WebDemo from '#lib/docs/web-demo.svelte';
+	import { LESSONS, type Lesson } from '#lib/docs/lessons.js';
+	import { WEB_LESSONS } from '#lib/docs/web-lessons.js';
+	import type { CodeLanguage } from '#lib/workspace/model.js';
 
 	let {
 		fill = false,

@@ -9,7 +9,9 @@ describe('web lessons', () => {
 
 	it('finds flex, a click handler, and nothing for a missing word', () => {
 		expect(webLessonMatches('flex').map((lesson) => lesson.id)).toEqual(['css-reihe']);
-		expect(webLessonMatches('addEventListener').some((lesson) => lesson.id === 'js-klick')).toBe(true);
+		expect(webLessonMatches('addEventListener').some((lesson) => lesson.id === 'js-klick')).toBe(
+			true
+		);
 		expect(webLessonMatches('kein-treffer')).toHaveLength(0);
 	});
 
@@ -18,10 +20,12 @@ describe('web lessons', () => {
 		expect(new Set(ids).size).toBe(ids.length);
 		expect(ids.every((id) => !LESSONS.some((lesson) => lesson.id === id))).toBe(true);
 		expect(WEB_LESSONS.every((lesson) => lesson.text && lesson.code.trim())).toBe(true);
-		expect(WEB_LESSONS.filter((lesson) => !lesson.filename).every((lesson) => lesson.code.includes('<'))).toBe(
-			true
+		expect(
+			WEB_LESSONS.filter((lesson) => !lesson.filename).every((lesson) => lesson.code.includes('<'))
+		).toBe(true);
+		expect(WEB_LESSONS.find((lesson) => lesson.id === 'txt-nur')?.code).toBe(
+			'... es ist nur text :D'
 		);
-		expect(WEB_LESSONS.find((lesson) => lesson.id === 'txt-nur')?.code).toBe('... es ist nur text :D');
 		const groups = [...new Set(WEB_LESSONS.map((lesson) => lesson.group))];
 		expect(groups).toEqual(['HTML', 'CSS', 'JavaScript', 'JSON', 'XML', 'Markdown', 'Text']);
 	});

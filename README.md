@@ -9,13 +9,14 @@ Die Seite ist eine statische Website. Cloudflare liefert nur Dateien aus und fü
 - Python, HTML, CSS, JavaScript, JSON, XML, Markdown und Text schreiben
 - Python im Browser ausführen und mit Ruff prüfen
 - HTML, CSS und JavaScript prüfen, auch Skript und Stil in einer HTML-Datei
-- Dateien und Ordner anlegen; ohne Anmeldung bleiben sie in IndexedDB in diesem Browser
-- optional mit demselben wwschool-Zugang direkt per WebDAV synchronisieren; der persönliche Ordner wird automatisch erkannt und der Workspace als komprimierte `coder-workspace.py` dort abgelegt, im selben Format wie beim Datenbank-Download
-- den gesamten Workspace als `coder-workspace.py` herunterladen; der Import ersetzt die Datenbank nach einer Rückfrage
-- einen Dateiinhalt als Link teilen; ein geöffneter geteilter Stand bleibt ungespeichert, bis du einen Ordner wählst
-- vor dem Schließen warnen, solange eine Änderung noch nicht gespeichert ist
+- Dateien und Ordner anlegen; offene Tabs, Inhalte und der Ungespeichert-Stand bleiben im Browser erhalten, sind aber kein Ersatz für wwschool
+- optional mit demselben wwschool-Zugang Dateien in `coder-kplus` in der persönlichen Dateiablage ablegen; der Explorer zeigt diesen Ordner, Speichern öffnet einen Speichern-unter-Dialog
+- den gesamten Workspace als `coder-workspace.py` herunterladen; der Import ersetzt den geöffneten Workspace nach einer Rückfrage
+- live gemeinsam arbeiten: Sechs-Wörter-Code, bis zu 16 Teilnehmende, Ende-zu-Ende-verschlüsselte Dateinamen, Ordner, Tabs und Inhalte; Beitreten öffnet einen eigenen Tab nur für die Sitzung, der lokale Editorstand bleibt getrennt
+- einen Dateiinhalt als Link teilen; ein geöffneter geteilter Stand bleibt ungespeichert, bis du speicherst oder die Datei herunterlädst
+- beim Schließen eines ungespeicherten Editor-Tabs nachfragen; das Schließen des Browser-Tabs warnt nicht, weil der Editorstand lokal liegt
 
-`Cmd/Strg + Enter` führt den Code aus. `Cmd/Strg + S` lädt die geöffnete Datei herunter.
+`Cmd/Strg + Enter` führt den Code aus. `Cmd/Strg + S` öffnet Speichern, oder die wwschool-Anmeldung, wenn du nicht angemeldet bist. Ein Datei-Download gilt für diese Datei als gespeichert.
 
 ## Cloudflare
 
@@ -25,9 +26,11 @@ Ein eigenes Worker-Skript würde Anfragen abrechenbar machen. Deshalb bleibt die
 
 `python.k-plus.one` zeigt die Seite nicht mehr. `redirect/` ist ein eigener Worker, der dort nur mit 301 auf dieselbe Adresse unter `coder.k-plus.one` antwortet. Die Seite selbst bleibt ohne Worker-Skript.
 
-Die Python-Laufzeit (Pyodide 314.0.7, inklusive Standardbibliothek) liegt unter `/pyodide/` und wird mit der Seite ausgeliefert. Ruff ebenfalls. Beides ist ein Abruf derselben Website, kein Aufruf eines Cloudflare-Workers. Python-Code wird im Browser ausgeführt. Bei aktivierter wwschool-Synchronisierung sendet der Browser den Workspace direkt über HTTPS per WebDAV an wwschool; die Zugangsdaten werden bei „Angemeldet bleiben“ verschlüsselt im lokalen IndexedDB-Speicher gehalten, sonst nur für die aktuelle Sitzung.
+Die Python-Laufzeit (Pyodide 314.0.7, inklusive Standardbibliothek) liegt unter `/pyodide/` und wird mit der Seite ausgeliefert. Ruff ebenfalls. Beides ist ein Abruf derselben Website, kein Aufruf eines Cloudflare-Workers. Python-Code wird im Browser ausgeführt. Offene Tabs und ihr Stand liegen in IndexedDB in diesem Browser; das ist der Editorstand, kein Abgleich mit wwschool. Bei wwschool-Anmeldung legt der Browser den Ordner `coder-kplus` in der persönlichen Dateiablage an und lädt einzelne Dateien per WebDAV hoch; die Zugangsdaten werden bei „Angemeldet bleiben“ verschlüsselt im lokalen IndexedDB-Speicher gehalten, sonst nur für die aktuelle Sitzung.
 
-Beim Verbinden vergleicht die Seite lokale und entfernte Stände. Wenn beide seit der letzten Synchronisierung geändert wurden oder sich der Serverstand während eines Speicherns ändert, wird nichts still überschrieben: Die Seite hält an und bietet eine bewusste Auswahl an. Der Abgleich prüft den Serverstand in kurzen Abständen erneut, solange der Tab sichtbar ist.
+wwschool erzeugt bei jedem Upload eine neue Datei. Gleicher Name wird eine weitere Kopie. Löschen geht nur in der wwschool-App oder im Web.
+
+Die Zusammenarbeit nutzt einen WebSocket-Relay auf `server`. Die Sitzungskennung wird als SHA-256-Hash aus dem Sechs-Wörter-Code abgeleitet; OPAQUE schützt die Anmeldung. Workspace-Daten werden im Browser mit AES-GCM verschlüsselt, bevor sie den Relay erreichen. Er hält aktive Sitzungen nur im Arbeitsspeicher. Er sieht Sitzungs- und Verbindungsmetadaten wie Teilnehmende und Datenmenge, aber weder den Code im Klartext noch Workspace-Klartext. Jede teilnehmende Person mit dem Code kann den Workspace lesen und bearbeiten.
 
 Im Browser fehlen normale Prozesse und native Threads. Ein Lauf endet nach 15 Sekunden oder beim Stopp; der Python-Worker wird danach neu aufgebaut.
 

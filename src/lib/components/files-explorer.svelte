@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Download from '@lucide/svelte/icons/download';
 	import FileCode from '@lucide/svelte/icons/file-code';
 	import FileDown from '@lucide/svelte/icons/file-down';
 	import FilePlus from '@lucide/svelte/icons/file-plus';
@@ -12,12 +11,12 @@
 	import Upload from '@lucide/svelte/icons/upload';
 	import Cloud from '@lucide/svelte/icons/cloud';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import { ScrollArea } from '$lib/components/ui/scroll-area/index.js';
-	import { parseWorkspaceArchive } from '$lib/workspace/archive';
-	import NewFileDialog from '$lib/components/new-file-dialog.svelte';
+	import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import { ScrollArea } from '#lib/components/ui/scroll-area/index.js';
+	import { parseWorkspaceArchive } from '#lib/workspace/archive.js';
+	import NewFileDialog from '#lib/components/new-file-dialog.svelte';
 	import {
 		createFile,
 		createFolder,
@@ -36,7 +35,7 @@
 		type WorkspaceFile,
 		type WorkspaceFolder,
 		type WorkspaceSnapshot
-	} from '$lib/workspace/model';
+	} from '#lib/workspace/model.js';
 
 	const FILE_IMPORT_LIMIT = 1_000_000;
 	const ARCHIVE_IMPORT_LIMIT = 20_000_000;
@@ -46,25 +45,31 @@
 		openedToken = 0,
 		snapshot,
 		onchange,
-		ondownload,
 		onnotice,
 		onrestore,
 		syncStatus = 'local',
 		syncLocation = '',
 		onresolve,
-		onsave
+		remote = false,
+		onopenfile,
+		onremotefolder,
+		onremotefile,
+		onimportfiles
 	}: {
 		open?: boolean;
 		openedToken?: number;
 		snapshot: WorkspaceSnapshot;
 		onchange: (next: WorkspaceSnapshot) => void;
-		ondownload: () => void;
 		onnotice?: (message: string) => void;
 		onrestore?: () => void;
 		syncStatus?: 'local' | 'syncing' | 'synced' | 'conflict' | 'error';
 		syncLocation?: string;
 		onresolve?: () => void;
-		onsave?: (folderId: string) => void;
+		remote?: boolean;
+		onopenfile?: (fileId: string) => void;
+		onremotefolder?: (parentId: string, name: string) => void | Promise<void>;
+		onremotefile?: (folderId: string, name: string) => void | Promise<void>;
+		onimportfiles?: (files: { name: string; content: string }[]) => void;
 	} = $props();
 
 	let createOpen = $state(false);
@@ -105,6 +110,13 @@
 	}
 
 	function addFolder(parentId: string | null) {
+		if (remote) {
+			const name = window.prompt('Neuer Ordnername')?.trim();
+			const parent = parentId ?? snapshot.folders[0]?.id;
+			if (!name || !parent || !onremotefolder) return;
+			void onremotefolder(parent, name);
+			return;
+		}
 		const next = createFolder(snapshot, parentId, 'Ordner');
 		const created = next.folders.find(
 			(folder) => !snapshot.folders.some((existing) => existing.id === folder.id)
@@ -114,6 +126,10 @@
 	}
 
 	function createNamed(name: string) {
+		if (remote) {
+			if (onremotefile) void onremotefile(snapshot.selectedFolderId, name);
+			return;
+		}
 		const next = createFile(snapshot, snapshot.selectedFolderId, name);
 		const created = next.files.find(
 			(file) => !snapshot.files.some((existing) => existing.id === file.id)
@@ -123,6 +139,11 @@
 	}
 
 	function openSelected(fileId: string) {
+		if (remote) {
+			onopenfile?.(fileId);
+			open = false;
+			return;
+		}
 		onchange(openFile(snapshot, fileId));
 		open = false;
 	}
@@ -247,7 +268,7 @@
 		else if (skippedType.length) {
 			notes.push(`${skippedType.length} Dateien haben ein Format, das nicht unterstützt wird.`);
 		}
-		if (archives.length) {
+		if (archives.length && !remote) {
 			pendingRestore = {
 				name: archives[0].name,
 				snapshot: archives[0].snapshot,
@@ -257,7 +278,13 @@
 			if (notes.length) onnotice?.(notes.join(' '));
 			return;
 		}
-		if (incoming.length) onchange(importFiles(snapshot, snapshot.selectedFolderId, incoming));
+		if (incoming.length) {
+			if (remote) onimportfiles?.(incoming);
+			else onchange(importFiles(snapshot, snapshot.selectedFolderId, incoming));
+		}
+		if (archives.length && remote) {
+			onnotice?.('Workspace-Archive bitte im lokalen Explorer importieren.');
+		}
 		if (incoming.length === 1) notes.push(`${incoming[0].name} importiert`);
 		else if (incoming.length) notes.push(`${incoming.length} Dateien importiert`);
 		if (notes.length) onnotice?.(notes.join(' '));
@@ -272,7 +299,7 @@
 		renaming = null;
 		onchange(pending.snapshot);
 		onrestore?.();
-		onnotice?.('Datenbank ersetzt. Die bisherigen Dateien wurden gelöscht.');
+		onnotice?.('Workspace ersetzt. Die bisherigen Dateien wurden entfernt.');
 		open = false;
 	}
 
@@ -307,13 +334,7 @@
 		<div class="explorer-header">
 			<div>
 				<Dialog.Title>Dateien</Dialog.Title>
-				<Dialog.Description class={onsave ? 'mt-1 text-xs' : 'sr-only'}>
-					{#if onsave}
-						Ordner wählen, dann hier speichern. Die Datei bleibt sonst ungespeichert.
-					{:else}
-						Dateien und Ordner.
-					{/if}
-				</Dialog.Description>
+				<Dialog.Description class="sr-only">Dateien und Ordner.</Dialog.Description>
 			</div>
 			<div class="sync-state" data-state={syncStatus} aria-live="polite" title={syncLocation}>
 				{#if syncStatus === 'syncing'}
@@ -341,21 +362,12 @@
 				<Button variant="outline" size="sm" onclick={() => fileInput?.click()}
 					><Upload /> Importieren</Button
 				>
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={exportFiles}
-					disabled={visibleFiles.length === 0}><FileDown /> Exportieren</Button
-				>
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={ondownload}
-					title="Datenbank herunterladen"
-					aria-label="Datenbank herunterladen"><Download /> Datenbank</Button
-				>
-				{#if onsave}
-					<Button size="sm" onclick={() => onsave(snapshot.selectedFolderId)}>Hier speichern</Button
+				{#if !remote}
+					<Button
+						variant="outline"
+						size="sm"
+						onclick={exportFiles}
+						disabled={visibleFiles.length === 0}><FileDown /> Exportieren</Button
 					>
 				{/if}
 			</div>
@@ -369,7 +381,7 @@
 						class="add-btn"
 						aria-label="Neuer Ordner"
 						title="Neuer Ordner"
-						onclick={() => addFolder(null)}
+						onclick={() => addFolder(remote ? (snapshot.folders[0]?.id ?? null) : null)}
 					>
 						<Plus />
 					</button>
@@ -399,35 +411,47 @@
 										<Folder />
 										<span>{row.folder.name}</span>
 									</button>
-									<button
-										type="button"
-										class="icon-btn"
-										aria-label={`In ${row.folder.name} einen Ordner anlegen`}
-										title="Neuer Ordner"
-										onclick={() => addFolder(row.folder.id)}
-									>
-										<Plus />
-									</button>
-									<button
-										type="button"
-										class="icon-btn"
-										aria-label={`${row.folder.name} umbenennen`}
-										onclick={() => startRename('folder', row.folder.id, row.folder.name)}
-									>
-										<Pencil />
-									</button>
-									<button
-										type="button"
-										class="icon-btn"
-										aria-label={`${row.folder.name} löschen`}
-										title={row.folder.id === ROOT_FOLDER_ID
-											? 'Der Hauptordner bleibt erhalten'
-											: 'Ordner löschen'}
-										disabled={row.folder.id === ROOT_FOLDER_ID}
-										onclick={() => askDeleteFolder(row.folder)}
-									>
-										<Trash2 />
-									</button>
+									{#if remote}
+										<button
+											type="button"
+											class="icon-btn"
+											aria-label={`In ${row.folder.name} einen Ordner anlegen`}
+											title="Neuer Ordner"
+											onclick={() => addFolder(row.folder.id)}
+										>
+											<Plus />
+										</button>
+									{:else}
+										<button
+											type="button"
+											class="icon-btn"
+											aria-label={`In ${row.folder.name} einen Ordner anlegen`}
+											title="Neuer Ordner"
+											onclick={() => addFolder(row.folder.id)}
+										>
+											<Plus />
+										</button>
+										<button
+											type="button"
+											class="icon-btn"
+											aria-label={`${row.folder.name} umbenennen`}
+											onclick={() => startRename('folder', row.folder.id, row.folder.name)}
+										>
+											<Pencil />
+										</button>
+										<button
+											type="button"
+											class="icon-btn"
+											aria-label={`${row.folder.name} löschen`}
+											title={row.folder.id === ROOT_FOLDER_ID
+												? 'Der Hauptordner bleibt erhalten'
+												: 'Ordner löschen'}
+											disabled={row.folder.id === ROOT_FOLDER_ID}
+											onclick={() => askDeleteFolder(row.folder)}
+										>
+											<Trash2 />
+										</button>
+									{/if}
 								{/if}
 							</li>
 						{/each}
@@ -438,15 +462,27 @@
 				<div class="pane-label files-label">
 					<span>{currentPath}</span>
 					<div class="file-actions">
-						<button
-							type="button"
-							class="add-btn"
-							aria-label="Neue Datei"
-							title="Neue Datei"
-							onclick={() => (createOpen = true)}
-						>
-							<FilePlus />
-						</button>
+						{#if !remote}
+							<button
+								type="button"
+								class="add-btn"
+								aria-label="Neue Datei"
+								title="Neue Datei"
+								onclick={() => (createOpen = true)}
+							>
+								<FilePlus />
+							</button>
+						{:else}
+							<button
+								type="button"
+								class="add-btn"
+								aria-label="Neue Datei"
+								title="Neue Datei in diesem wwschool-Ordner"
+								onclick={() => (createOpen = true)}
+							>
+								<FilePlus />
+							</button>
+						{/if}
 						<Button
 							variant="outline"
 							size="xs"
@@ -481,26 +517,28 @@
 										>
 											<FileCode />
 											<span>{file.name}</span>
-											{#if file.id === snapshot.activeFileId}<em>Offen</em>{/if}
+											{#if !remote && file.id === snapshot.activeFileId}<em>Offen</em>{/if}
 										</button>
-										<button
-											type="button"
-											class="icon-btn"
-											aria-label={`${file.name} umbenennen`}
-											onclick={() => startRename('file', file.id, file.name)}
-										>
-											<Pencil />
-										</button>
-										<button
-											type="button"
-											class="icon-btn"
-											aria-label={`${file.name} löschen`}
-											title={soleFile ? 'Die letzte Datei bleibt erhalten' : 'Datei löschen'}
-											disabled={soleFile}
-											onclick={() => askDeleteFile(file)}
-										>
-											<Trash2 />
-										</button>
+										{#if !remote}
+											<button
+												type="button"
+												class="icon-btn"
+												aria-label={`${file.name} umbenennen`}
+												onclick={() => startRename('file', file.id, file.name)}
+											>
+												<Pencil />
+											</button>
+											<button
+												type="button"
+												class="icon-btn"
+												aria-label={`${file.name} löschen`}
+												title={soleFile ? 'Die letzte Datei bleibt erhalten' : 'Datei löschen'}
+												disabled={soleFile}
+												onclick={() => askDeleteFile(file)}
+											>
+												<Trash2 />
+											</button>
+										{/if}
 									{/if}
 								</li>
 							{/each}
@@ -515,10 +553,10 @@
 <AlertDialog.Root bind:open={restoreOpen}>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
-			<AlertDialog.Title>Datenbank ersetzen?</AlertDialog.Title>
+			<AlertDialog.Title>Workspace ersetzen?</AlertDialog.Title>
 			<AlertDialog.Description>
-				„{pendingRestore?.name}“ ersetzt die gesamte Datenbank. Alle Ordner und Dateien in diesem
-				Browser werden gelöscht.
+				„{pendingRestore?.name}“ ersetzt den geöffneten Workspace. Alle bisherigen Ordner und
+				Dateien werden entfernt.
 				{#if pendingRestore && pendingRestore.ignored > 0}
 					Die anderen ausgewählten Dateien werden dabei nicht importiert.
 				{/if}

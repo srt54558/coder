@@ -1,4 +1,4 @@
-import type { RuffDiagnostic } from '$lib/runner/protocol';
+import type { RuffDiagnostic } from '#lib/runner/protocol.js';
 
 export function lineExcerpt(
 	doc: string,

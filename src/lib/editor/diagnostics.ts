@@ -1,5 +1,5 @@
 import type { Diagnostic } from '@codemirror/lint';
-import { isDiagnosticError, type RuffDiagnostic } from '$lib/runner/protocol';
+import { isDiagnosticError, type RuffDiagnostic } from '#lib/runner/protocol.js';
 
 function lineStarts(doc: string): number[] {
 	const starts = [0];
@@ -28,14 +28,14 @@ export function diagnosticsForDocument(
 ): Diagnostic[] {
 	const starts = lineStarts(doc);
 	return items.map((item) => {
-		const fromStart = positionToOffset(doc, item.start_location.row, item.start_location.column, starts);
-		let from = fromStart;
-		const lineEnd = positionToOffset(
+		const fromStart = positionToOffset(
 			doc,
 			item.start_location.row,
-			Number.MAX_SAFE_INTEGER,
+			item.start_location.column,
 			starts
 		);
+		let from = fromStart;
+		const lineEnd = positionToOffset(doc, item.start_location.row, Number.MAX_SAFE_INTEGER, starts);
 		let to = positionToOffset(doc, item.end_location.row, item.end_location.column, starts);
 		if (to > lineEnd) to = lineEnd;
 		if (to <= from) {

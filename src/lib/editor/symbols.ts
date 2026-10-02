@@ -44,9 +44,21 @@ export function symbolAt(state: EditorState, pos: number, side: -1 | 1 = -1): Py
 	for (let cursor: SyntaxNode | null = node; cursor; cursor = cursor.parent) {
 		if (skipNodes.has(cursor.name)) return null;
 	}
-	const hit = lookup(symbolsFor(state), state.sliceDoc(node.from, node.to), node.from, node.name === 'PropertyName');
+	const hit = lookup(
+		symbolsFor(state),
+		state.sliceDoc(node.from, node.to),
+		node.from,
+		node.name === 'PropertyName'
+	);
 	if (!hit) return null;
-	return { name: hit.name, kind: hit.kind, scheme: hit.scheme, doc: hit.doc, from: node.from, to: node.to };
+	return {
+		name: hit.name,
+		kind: hit.kind,
+		scheme: hit.scheme,
+		doc: hit.doc,
+		from: node.from,
+		to: node.to
+	};
 }
 
 export function definitionOf(state: EditorState, name: string, pos: number): PythonSymbol | null {
@@ -71,9 +83,18 @@ function symbolsFor(state: EditorState): StoredSymbol[] {
 	return symbols;
 }
 
-function lookup(symbols: StoredSymbol[], name: string, pos: number, property: boolean): StoredSymbol | null {
+function lookup(
+	symbols: StoredSymbol[],
+	name: string,
+	pos: number,
+	property: boolean
+): StoredSymbol | null {
 	const named = symbols.filter(
-		(symbol) => symbol.name === name && (property ? symbol.kind === 'property' || symbol.kind === 'function' : symbol.kind !== 'property')
+		(symbol) =>
+			symbol.name === name &&
+			(property
+				? symbol.kind === 'property' || symbol.kind === 'function'
+				: symbol.kind !== 'property')
 	);
 	const visible = named.filter((symbol) => symbol.scopeFrom <= pos && pos <= symbol.scopeTo);
 	const pool = visible.length > 0 ? visible : property ? named : [];
@@ -202,7 +223,7 @@ function defineImport(
 			afterImport = true;
 			continue;
 		}
-		if (!afterImport || child.name !== 'VariableName' && child.name !== 'as') continue;
+		if (!afterImport || (child.name !== 'VariableName' && child.name !== 'as')) continue;
 		if (child.name === 'VariableName') {
 			pending = child;
 			continue;
@@ -222,7 +243,11 @@ function paramScheme(state: EditorState, nameNode: SyntaxNode): string {
 	const previous = nameNode.prevSibling;
 	if (previous && (previous.name === '*' || previous.name === '**')) from = previous.from;
 	let to = nameNode.to;
-	for (let sibling = nameNode.nextSibling; sibling && sibling.name !== ',' && sibling.name !== ')' && sibling.name !== '/'; sibling = sibling.nextSibling) {
+	for (
+		let sibling = nameNode.nextSibling;
+		sibling && sibling.name !== ',' && sibling.name !== ')' && sibling.name !== '/';
+		sibling = sibling.nextSibling
+	) {
 		to = sibling.to;
 	}
 	return collapse(state.sliceDoc(from, to));
@@ -248,10 +273,21 @@ function collapse(value: string): string {
 }
 
 function unquote(value: string): string {
-	if ((value.startsWith('"""') || value.startsWith("'''")) && value.length >= 6 && value.slice(0, 3) === value.slice(-3)) {
-		return value.slice(3, -3).replace(/^\r?\n/, '').trim();
+	if (
+		(value.startsWith('"""') || value.startsWith("'''")) &&
+		value.length >= 6 &&
+		value.slice(0, 3) === value.slice(-3)
+	) {
+		return value
+			.slice(3, -3)
+			.replace(/^\r?\n/, '')
+			.trim();
 	}
-	if ((value.startsWith('"') || value.startsWith("'")) && value.length >= 2 && value[0] === value.at(-1)) {
+	if (
+		(value.startsWith('"') || value.startsWith("'")) &&
+		value.length >= 2 &&
+		value[0] === value.at(-1)
+	) {
 		return value.slice(1, -1);
 	}
 	return value.trim();

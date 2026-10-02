@@ -1,5 +1,5 @@
 import { Marked } from 'marked';
-import { codeLanguage } from '$lib/workspace/model';
+import { codeLanguage } from '#lib/workspace/model.js';
 
 const markdown = new Marked({ gfm: true });
 

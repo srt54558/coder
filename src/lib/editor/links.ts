@@ -1,4 +1,4 @@
-import { fileMime, isHtmlFile } from '$lib/workspace/model';
+import { fileMime, isHtmlFile } from '#lib/workspace/model.js';
 
 export type ProjectTextFile = {
 	path: string;
@@ -20,7 +20,7 @@ export function resolveProjectPath(fromDir: string, raw: string): string | null 
 	if (/^[a-z][a-z0-9+.-]*:/iu.test(value) || value.startsWith('//')) return null;
 	const path = value.split('#')[0]?.split('?')[0] ?? '';
 	if (!path) return null;
-	let decoded = path;
+	let decoded: string;
 	try {
 		decoded = decodeURIComponent(path);
 	} catch {
@@ -70,13 +70,21 @@ function scriptSource(path: string, files: Map<string, string>, seen: Set<string
 	return textDataUrl(fileMime(path), marked);
 }
 
-function rewriteCss(css: string, fromDir: string, files: Map<string, string>, seen: Set<string>): string {
-	const withUrls = css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/giu, (match, _quote, url: string) => {
-		const resolved = resolveProjectPath(fromDir, url.trim());
-		if (!resolved) return match;
-		const href = embed(resolved, files, seen);
-		return href ? `url("${href}")` : 'url("data:,")';
-	});
+function rewriteCss(
+	css: string,
+	fromDir: string,
+	files: Map<string, string>,
+	seen: Set<string>
+): string {
+	const withUrls = css.replace(
+		/url\(\s*(['"]?)([^'")]+)\1\s*\)/giu,
+		(match, _quote, url: string) => {
+			const resolved = resolveProjectPath(fromDir, url.trim());
+			if (!resolved) return match;
+			const href = embed(resolved, files, seen);
+			return href ? `url("${href}")` : 'url("data:,")';
+		}
+	);
 	return withUrls.replace(
 		/@import\s+(?:url\(\s*)?(['"])([^'"]+)\1\s*\)?/giu,
 		(match, _quote, url: string) => {
@@ -111,16 +119,22 @@ function fileMap(files: ProjectTextFile[]): Map<string, string> {
 }
 
 function rewriteStyleTags(html: string, baseDir: string, files: Map<string, string>): string {
-	return html.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/giu, (_tag, attrs: string, css: string) => {
-		return `<style${attrs}>${rewriteCss(css, baseDir, files, new Set())}</style>`;
-	});
+	return html.replace(
+		/<style\b([^>]*)>([\s\S]*?)<\/style>/giu,
+		(_tag, attrs: string, css: string) => {
+			return `<style${attrs}>${rewriteCss(css, baseDir, files, new Set())}</style>`;
+		}
+	);
 }
 
 function rewriteInlineModules(html: string, baseDir: string, files: Map<string, string>): string {
-	return html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/giu, (tag, attrs: string, code: string) => {
-		if (/\bsrc\s*=/iu.test(attrs) || !/type\s*=\s*(['"])module\1/iu.test(attrs)) return tag;
-		return `<script${attrs}>${rewriteModuleSpecifiers(code, baseDir, files, new Set())}</script>`;
-	});
+	return html.replace(
+		/<script\b([^>]*)>([\s\S]*?)<\/script>/giu,
+		(tag, attrs: string, code: string) => {
+			if (/\bsrc\s*=/iu.test(attrs) || !/type\s*=\s*(['"])module\1/iu.test(attrs)) return tag;
+			return `<script${attrs}>${rewriteModuleSpecifiers(code, baseDir, files, new Set())}</script>`;
+		}
+	);
 }
 
 function rewriteResources(html: string, baseDir: string, files: Map<string, string>): string {
@@ -199,12 +213,17 @@ export function htmlUsingAsset(
 		return 0;
 	});
 	for (const html of ordered) {
-		if (reachesAsset(html.content, directoryOf(html.path), assetKey, byKey, new Set())) return html.path;
+		if (reachesAsset(html.content, directoryOf(html.path), assetKey, byKey, new Set()))
+			return html.path;
 	}
 	return null;
 }
 
 export function linkDocument(source: string, baseDir: string, files: ProjectTextFile[]): string {
 	const map = fileMap(files);
-	return rewriteResources(rewriteInlineModules(rewriteStyleTags(source, baseDir, map), baseDir, map), baseDir, map);
+	return rewriteResources(
+		rewriteInlineModules(rewriteStyleTags(source, baseDir, map), baseDir, map),
+		baseDir,
+		map
+	);
 }

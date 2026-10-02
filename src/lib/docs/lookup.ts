@@ -1,6 +1,6 @@
 import { LESSONS, type Lesson } from './lessons';
 import { WEB_LESSONS } from './web-lessons';
-import type { CodeLanguage } from '$lib/workspace/model';
+import type { CodeLanguage } from '#lib/workspace/model.js';
 
 const GROUPS: Record<Exclude<CodeLanguage, 'python'>, string> = {
 	html: 'HTML',

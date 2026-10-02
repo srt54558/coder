@@ -3,13 +3,29 @@
 /// <reference lib="esnext" />
 /// <reference lib="webworker" />
 
-import { build, files, prerendered, version } from '$service-worker';
+import { version } from '$app/env';
+import { assets, immutable, prerendered } from '$app/manifest';
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const CACHE = `k-plus-coder-${version}`;
 
+function manifestPath(entry: { path: string } | string): string {
+	return typeof entry === 'string' ? entry : entry.path;
+}
+
+function withSlash(pathname: string): string {
+	return pathname.startsWith('/') ? pathname : `/${pathname}`;
+}
+
 // `_headers` is a Cloudflare config file, not an app asset. `_app` stays included.
-const PRECACHE = [...new Set([...build, ...files, ...prerendered])].filter((pathname) => {
+const PRECACHE = [
+	...new Set(
+		[...immutable, ...assets, ...prerendered]
+			.map(manifestPath)
+			.filter((pathname) => pathname.length > 0)
+			.map(withSlash)
+	)
+].filter((pathname) => {
 	const name = pathname.slice(pathname.lastIndexOf('/') + 1);
 	if (name === '_headers' || name === '_redirects') return false;
 	if (pathname.includes('/pyodide/')) return false;

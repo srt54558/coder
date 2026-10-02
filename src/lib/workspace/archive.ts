@@ -10,7 +10,7 @@ const RESTORE_PROGRAM = `#!/usr/bin/env python3
 
 Im Terminal ausführen und mit y bestätigen, um alle Ordner und Dateien
 neben dieser Datei anzulegen. In der App über Importieren laden, um die
-gespeicherte Datenbank zu ersetzen.
+den geöffneten Workspace zu ersetzen.
 """
 
 from __future__ import annotations

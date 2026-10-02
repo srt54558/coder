@@ -1,7 +1,7 @@
 import { python } from '@codemirror/lang-python';
 import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import type { CodeLanguage } from '$lib/workspace/model';
+import type { CodeLanguage } from '#lib/workspace/model.js';
 import { languageAssist } from './assist';
 
 const LABELS: Record<CodeLanguage, string> = {

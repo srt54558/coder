@@ -1,7 +1,7 @@
 import { parse as parseJavaScript, type Node } from 'acorn';
 import { lexer, parse as parseCss, walk as walkCss } from 'css-tree';
-import type { RuffDiagnostic } from '$lib/runner/protocol';
-import { codeLanguage } from '$lib/workspace/model';
+import type { RuffDiagnostic } from '#lib/runner/protocol.js';
+import { codeLanguage } from '#lib/workspace/model.js';
 
 type Position = { row: number; column: number };
 
@@ -151,7 +151,12 @@ function lintJavaScript(
 	return issues;
 }
 
-function unusedBinding(name: string, start: Position, report: boolean, endColumn = start.column + name.length): Binding {
+function unusedBinding(
+	name: string,
+	start: Position,
+	report: boolean,
+	endColumn = start.column + name.length
+): Binding {
 	return { name, used: false, report, row: start.row, column: start.column, endColumn };
 }
 
@@ -167,7 +172,12 @@ function nearestFunction(scope: Scope): Scope {
 	return current;
 }
 
-function declareName(scope: Scope, name: string, loc: AcornLoc | null | undefined, report: boolean) {
+function declareName(
+	scope: Scope,
+	name: string,
+	loc: AcornLoc | null | undefined,
+	report: boolean
+) {
 	if (scope.bindings.has(name)) return;
 	const start = loc ? { row: loc.start.line, column: loc.start.column + 1 } : { row: 1, column: 1 };
 	const endColumn = loc ? loc.end.column + 1 : start.column + name.length;
@@ -232,11 +242,17 @@ function collectDeclared(node: WalkNode | null, scope: Scope) {
 			else if (property.type === 'Property') collectDeclared(property.value as WalkNode, scope);
 		}
 	} else if (node.type === 'ArrayPattern') {
-		for (const element of (node.elements as Array<WalkNode | null>) ?? []) collectDeclared(element, scope);
+		for (const element of (node.elements as Array<WalkNode | null>) ?? [])
+			collectDeclared(element, scope);
 	}
 }
 
-function walk(node: WalkNode | null, scope: Scope, references: Reference[], mode: 'ref' | 'declare' = 'ref') {
+function walk(
+	node: WalkNode | null,
+	scope: Scope,
+	references: Reference[],
+	mode: 'ref' | 'declare' = 'ref'
+) {
 	if (!node || typeof node.type !== 'string') return;
 	if (mode === 'declare') {
 		if (node.type === 'Identifier') {
@@ -248,7 +264,11 @@ function walk(node: WalkNode | null, scope: Scope, references: Reference[], mode
 			walk(node.right as WalkNode, scope, references, 'ref');
 			return;
 		}
-		if (node.type === 'ObjectPattern' || node.type === 'ArrayPattern' || node.type === 'RestElement') {
+		if (
+			node.type === 'ObjectPattern' ||
+			node.type === 'ArrayPattern' ||
+			node.type === 'RestElement'
+		) {
 			collectDeclared(node, scope);
 			return;
 		}
@@ -270,15 +290,18 @@ function walk(node: WalkNode | null, scope: Scope, references: Reference[], mode
 			if (node.type !== 'ArrowFunctionExpression') {
 				inner.bindings.set('arguments', unusedBinding('arguments', { row: 1, column: 1 }, false));
 			}
-			if (node.id) declareName(inner, String((node.id as WalkNode).name), nodeLoc(node.id as WalkNode), false);
-			for (const param of (node.params as WalkNode[]) ?? []) walk(param, inner, references, 'declare');
+			if (node.id)
+				declareName(inner, String((node.id as WalkNode).name), nodeLoc(node.id as WalkNode), false);
+			for (const param of (node.params as WalkNode[]) ?? [])
+				walk(param, inner, references, 'declare');
 			markDeclared(inner, false);
 			walk(node.body as WalkNode, inner, references);
 			return;
 		}
 		case 'VariableDeclaration': {
 			const target = node.kind === 'var' ? nearestFunction(scope) : scope;
-			for (const declarator of (node.declarations as WalkNode[]) ?? []) walk(declarator, target, references);
+			for (const declarator of (node.declarations as WalkNode[]) ?? [])
+				walk(declarator, target, references);
 			return;
 		}
 		case 'VariableDeclarator':
@@ -307,7 +330,8 @@ function walk(node: WalkNode | null, scope: Scope, references: Reference[], mode
 				declareName(scope, String((node.id as WalkNode).name), nodeLoc(node.id as WalkNode), true);
 			}
 			const inner = createScope(scope, 'block');
-			if (node.id) declareName(inner, String((node.id as WalkNode).name), nodeLoc(node.id as WalkNode), false);
+			if (node.id)
+				declareName(inner, String((node.id as WalkNode).name), nodeLoc(node.id as WalkNode), false);
 			walk(node.superClass as WalkNode, scope, references);
 			walk(node.body as WalkNode, inner, references);
 			return;
@@ -356,7 +380,11 @@ function walk(node: WalkNode | null, scope: Scope, references: Reference[], mode
 		case 'MetaProperty':
 			return;
 		case 'UnaryExpression':
-			if (node.operator === 'typeof' && (node.argument as WalkNode | undefined)?.type === 'Identifier') return;
+			if (
+				node.operator === 'typeof' &&
+				(node.argument as WalkNode | undefined)?.type === 'Identifier'
+			)
+				return;
 			walk(node.argument as WalkNode, scope, references);
 			return;
 		default:
@@ -398,7 +426,7 @@ function lintCss(
 ): RuffDiagnostic[] {
 	if (!code.trim()) return [];
 	const issues: RuffDiagnostic[] = [];
-	let ast: ReturnType<typeof parseCss> | null = null;
+	let ast: ReturnType<typeof parseCss> | null;
 	try {
 		ast = parseCss(code, {
 			positions: true,
@@ -447,7 +475,12 @@ function isJavaScriptType(attrs: string): boolean {
 	const match = /\btype\s*=\s*(['"])([^'"]*)\1/iu.exec(attrs);
 	if (!match) return true;
 	const type = match[2].trim().toLowerCase();
-	return type === '' || type === 'module' || type === 'text/javascript' || type === 'application/javascript';
+	return (
+		type === '' ||
+		type === 'module' ||
+		type === 'text/javascript' ||
+		type === 'application/javascript'
+	);
 }
 
 function lintHtml(source: string): RuffDiagnostic[] {
@@ -473,20 +506,27 @@ function lintHtml(source: string): RuffDiagnostic[] {
 		if (close) {
 			const name = close[1].toLowerCase();
 			const at = locate(source, index);
-			while (stack.length > 0 && stack.at(-1)?.name !== name && OPTIONAL_CLOSE.has(stack.at(-1)?.name ?? '')) {
+			while (
+				stack.length > 0 &&
+				stack.at(-1)?.name !== name &&
+				OPTIONAL_CLOSE.has(stack.at(-1)?.name ?? '')
+			) {
 				stack.pop();
 			}
 			const top = stack.at(-1);
 			if (!top) {
-				issues.push(issue('HTML', `Unerwartetes schließendes Tag </${name}>.`, at, { row: at.row, column: at.column + close[0].length }));
+				issues.push(
+					issue('HTML', `Unerwartetes schließendes Tag </${name}>.`, at, {
+						row: at.row,
+						column: at.column + close[0].length
+					})
+				);
 			} else if (top.name !== name) {
 				issues.push(
-					issue(
-						'HTML',
-						`</${name}> passt nicht zu <${top.name}>.`,
-						at,
-						{ row: at.row, column: at.column + close[0].length }
-					)
+					issue('HTML', `</${name}> passt nicht zu <${top.name}>.`, at, {
+						row: at.row,
+						column: at.column + close[0].length
+					})
 				);
 			} else {
 				stack.pop();
@@ -528,7 +568,12 @@ function lintHtml(source: string): RuffDiagnostic[] {
 	}
 	for (const open of stack) {
 		if (OPTIONAL_CLOSE.has(open.name)) continue;
-		issues.push(issue('HTML', `<${open.name}> ist nicht geschlossen.`, open, { row: open.row, column: open.column + open.name.length + 1 }));
+		issues.push(
+			issue('HTML', `<${open.name}> ist nicht geschlossen.`, open, {
+				row: open.row,
+				column: open.column + open.name.length + 1
+			})
+		);
 	}
 	return issues;
 }
@@ -541,7 +586,8 @@ function lintAttributes(source: string, attrs: string, attrsStart: number): Ruff
 		const value = match[2] ?? match[3] ?? '';
 		if (!value.trim() || match.index == null) continue;
 		const base = attrsStart + match.index + match[0].length - value.length - 1;
-		if (match[1].toLowerCase() === 'style') issues.push(...lintCss(source, value, base, 'declarationList'));
+		if (match[1].toLowerCase() === 'style')
+			issues.push(...lintCss(source, value, base, 'declarationList'));
 		else issues.push(...lintJavaScript(source, value, base, 'script', true));
 	}
 	return issues;
@@ -571,16 +617,27 @@ function lintJson(source: string): RuffDiagnostic[] {
 function lintXml(source: string): RuffDiagnostic[] {
 	const issues: RuffDiagnostic[] = [];
 	const stack: string[] = [];
-	const pattern = /<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<\/([A-Za-z_:][\w:.-]*)\s*>|<([A-Za-z_:][\w:.-]*)\b([^>]*?)(\/?)>/gu;
+	const pattern =
+		/<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!\[CDATA\[[\s\S]*?\]\]>|<\/([A-Za-z_:][\w:.-]*)\s*>|<([A-Za-z_:][\w:.-]*)\b([^>]*?)(\/?)>/gu;
 	let roots = 0;
 	for (const match of source.matchAll(pattern)) {
-		if (match[0].startsWith('<!--') || match[0].startsWith('<?') || match[0].startsWith('<!')) continue;
+		if (match[0].startsWith('<!--') || match[0].startsWith('<?') || match[0].startsWith('<!'))
+			continue;
 		const at = locate(source, match.index ?? 0);
 		if (match[1]) {
 			const name = match[1];
 			const top = stack.pop();
 			if (top !== name) {
-				issues.push(issue('XML', top ? `</${name}> passt nicht zu <${top}>.` : `Unerwartetes schließendes Tag </${name}>.`, at, at));
+				issues.push(
+					issue(
+						'XML',
+						top
+							? `</${name}> passt nicht zu <${top}>.`
+							: `Unerwartetes schließendes Tag </${name}>.`,
+						at,
+						at
+					)
+				);
 				return issues;
 			}
 			continue;
@@ -599,9 +656,14 @@ function lintXml(source: string): RuffDiagnostic[] {
 		const at = locate(source, 0);
 		return [issue('XML', 'XML braucht ein Wurzelelement.', at, at)];
 	}
-	if (roots > 1) return [issue('XML', 'XML darf nur ein Wurzelelement haben.', locate(source, 0), locate(source, 0))];
+	if (roots > 1)
+		return [
+			issue('XML', 'XML darf nur ein Wurzelelement haben.', locate(source, 0), locate(source, 0))
+		];
 	if (stack.length > 0) {
-		return [issue('XML', `<${stack[0]}> ist nicht geschlossen.`, locate(source, 0), locate(source, 0))];
+		return [
+			issue('XML', `<${stack[0]}> ist nicht geschlossen.`, locate(source, 0), locate(source, 0))
+		];
 	}
 	return issues;
 }
@@ -623,5 +685,12 @@ function lintMarkdown(source: string): RuffDiagnostic[] {
 		openRow = openRow ? 0 : index + 1;
 	}
 	if (!openRow) return [];
-	return [issue('MD', 'Der Codeblock ist nicht geschlossen.', { row: openRow, column: 1 }, { row: openRow, column: 4 })];
+	return [
+		issue(
+			'MD',
+			'Der Codeblock ist nicht geschlossen.',
+			{ row: openRow, column: 1 },
+			{ row: openRow, column: 4 }
+		)
+	];
 }

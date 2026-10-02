@@ -5,6 +5,7 @@ import {
 	createFile,
 	createFolder,
 	createInitialWorkspace,
+	closeFile,
 	deleteFile,
 	deleteFolder,
 	folderPath,
@@ -13,6 +14,7 @@ import {
 	importFiles,
 	isHtmlFile,
 	isPythonFile,
+	moveFileToFolder,
 	newFileNameError,
 	normalizeFileName,
 	projectFilePath,
@@ -73,6 +75,20 @@ describe('workspace model', () => {
 		expect(sanitizeWorkspace({ ...saved, welcomed: false }).welcomed).toBe(false);
 	});
 
+	it('allows closing the last editor tab without deleting the file', () => {
+		const initial = createInitialWorkspace('print(1)');
+		const closed = closeFile(initial, initial.files[0].id);
+		expect(closed.files).toHaveLength(1);
+		expect(closed.openFileIds).toEqual([]);
+		expect(closed.activeFileId).toBe('');
+		const withExtra = createFile(initial, ROOT_FOLDER_ID, 'zwei.py');
+		const second = withExtra.files.find((file) => file.name === 'zwei.py');
+		expect(closeFile(withExtra, second?.id ?? '').openFileIds).toEqual([initial.files[0].id]);
+		expect(sanitizeWorkspace({ ...closed, openFileIds: [], activeFileId: '' }).openFileIds).toEqual(
+			[]
+		);
+	});
+
 	it('keeps folders on the left model and files inside the selected folder', () => {
 		const initial = createInitialWorkspace('print(1)');
 		const withFolder = createFolder(initial, ROOT_FOLDER_ID, 'src');
@@ -99,6 +115,12 @@ describe('workspace model', () => {
 		const aufgabe = extraFile.files.find((file) => file.name === 'aufgabe.py');
 		expect(aufgabe ? projectFilePath(extraFile, aufgabe) : '').toBe('Übungen/aufgabe.py');
 		expect(createFolder(initial, 'missing', 'src')).toBe(initial);
+		const moved = moveFileToFolder(
+			withFile,
+			withFile.files.find((file) => file.name === 'hi.py')?.id ?? '',
+			ROOT_FOLDER_ID
+		);
+		expect(moved.files.find((file) => file.name === 'hi.py')?.folderId).toBe(ROOT_FOLDER_ID);
 	});
 
 	it('refuses to delete the root folder or the last file and tracks unsaved edits', () => {

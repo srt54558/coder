@@ -25,23 +25,25 @@
 	import Sun from '@lucide/svelte/icons/sun';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Undo2 from '@lucide/svelte/icons/undo-2';
+	import UsersRound from '@lucide/svelte/icons/users-round';
 	import X from '@lucide/svelte/icons/x';
-	import FilesExplorer from '$lib/components/files-explorer.svelte';
-	import NewFileDialog from '$lib/components/new-file-dialog.svelte';
-	import WelcomeDialog from '$lib/components/welcome-dialog.svelte';
-	import CodeEditor from '$lib/components/code-editor.svelte';
-	import { takeDocsPopup } from '$lib/docs/popup';
-	import { languageForLessonId } from '$lib/docs/lookup';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import * as Popover from '$lib/components/ui/popover/index.js';
-	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import { Label } from '$lib/components/ui/label/index.js';
-	import * as ButtonGroup from '$lib/components/ui/button-group/index.js';
-	import * as Resizable from '$lib/components/ui/resizable/index.js';
-	import type { RuffDiagnostic, RuffWorkerMessage, RunnerStatus } from '$lib/runner/protocol';
-	import { lineExcerpt } from '$lib/editor/explain';
+	import FilesExplorer from '#lib/components/files-explorer.svelte';
+	import SaveAsDialog from '#lib/components/save-as-dialog.svelte';
+	import NewFileDialog from '#lib/components/new-file-dialog.svelte';
+	import WelcomeDialog from '#lib/components/welcome-dialog.svelte';
+	import CodeEditor from '#lib/components/code-editor.svelte';
+	import { takeDocsPopup } from '#lib/docs/popup.js';
+	import { languageForLessonId } from '#lib/docs/lookup.js';
+	import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import * as Popover from '#lib/components/ui/popover/index.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as ButtonGroup from '#lib/components/ui/button-group/index.js';
+	import * as Resizable from '#lib/components/ui/resizable/index.js';
+	import type { RuffDiagnostic, RuffWorkerMessage, RunnerStatus } from '#lib/runner/protocol.js';
+	import { lineExcerpt } from '#lib/editor/explain.js';
 	import {
 		editorLineForPreview,
 		previewDocument,
@@ -51,76 +53,112 @@
 		readPreviewRequest,
 		scriptDocument,
 		scriptLineOffset
-	} from '$lib/editor/preview';
-	import { resolveProjectPath } from '$lib/editor/links';
-	import { consoleSegments, matchProblem } from '$lib/runner/console-links';
-	import { clipBlocks, clipText } from '$lib/runner/limits';
+	} from '#lib/editor/preview.js';
+	import { resolveProjectPath } from '#lib/editor/links.js';
+	import { consoleSegments, matchProblem } from '#lib/runner/console-links.js';
+	import { clipBlocks, clipText } from '#lib/runner/limits.js';
 	import {
 		disposePython,
 		holdPython,
 		runPython,
+		submitPythonInput,
 		stopPython,
 		watchPythonHost
-	} from '$lib/runner/python-host';
-	import { canShareCode, createShareUrl, decodeCode, IMPORT_PARAM } from '$lib/runner/share';
-	import { WORKSPACE_ARCHIVE_NAME, workspaceExport } from '$lib/workspace/archive';
-	import { loadWorkspace, saveWorkspace, writeWorkspaceBackup } from '$lib/workspace/database';
+	} from '#lib/runner/python-host.js';
+	import { canShareCode, createShareUrl, decodeCode, IMPORT_PARAM } from '#lib/runner/share.js';
+	import * as Y from 'yjs';
+	import {
+		COLLABORATION_RELAY_URL,
+		MAX_COLLABORATION_BYTES,
+		applyRemoteUpdate,
+		collaborationRoomIdFromCode,
+		createGroupKey,
+		createOpaqueHost,
+		createOpaqueServerLogin,
+		decodeBase64,
+		decryptPayload,
+		derivePairwiseKey,
+		destroySharedWorkspace,
+		encryptPayload,
+		encodeBase64,
+		finishOpaqueClientLogin,
+		finishOpaqueServerLogin,
+		fullWorkspaceUpdate,
+		generateGermanPassphrase,
+		importGroupKey,
+		isRemoteUpdateOrigin,
+		mergeUpdates,
+		normalizeCollaborationCode,
+		seedSharedWorkspace,
+		snapshotFromSharedWorkspace,
+		startOpaqueClientLogin,
+		syncSharedWorkspace,
+		type EncryptedPayload,
+		type OpaqueClientState,
+		type OpaqueHostState
+	} from '#lib/workspace/collaboration.js';
 	import {
 		clearWebDavCredentials,
+		CODER_FOLDER_NAME,
+		createWebDavFile,
+		createWebDavFolder,
+		coderProjectPath,
 		connectWebDav,
-		hashWorkspace,
+		emptyWebDavTree,
 		hasSessionWebDavCredentials,
-		isEmptyWorkspace,
+		listWebDavProjectTree,
 		loadWebDavCredentials,
-		loadWebDavSyncState,
-		probeWebDavWorkspace,
-		readWebDavWorkspace,
+		readWebDavFile,
 		rememberWebDavCredentials,
 		saveWebDavSyncState,
-		WebDavConflictError,
+		webDavRelativeDir,
 		WebDavError,
-		writeWebDavWorkspace,
-		type RemoteWorkspace,
+		writeWebDavProjectFile,
 		type WebDavConnection,
 		type WebDavCredentials,
-		type WebDavSyncState
-	} from '$lib/workspace/webdav';
+		type WebDavTree
+	} from '#lib/workspace/webdav.js';
 	import {
+		acceptedFileName,
 		closeFile,
-		structureSignature,
 		applyWelcomeChoice,
 		createFile,
 		createInitialWorkspace,
 		codeLanguage,
+		emptyCollaborationWorkspace,
 		fileMime,
-		hasUnsavedChanges,
 		importFiles,
 		isHtmlFile,
 		isPythonFile,
-		LEGACY_STORAGE_KEY,
+		newFileNameError,
 		openFile,
 		projectDirectory,
 		projectFilePath,
 		projectFiles,
+		renameFile,
+		ROOT_FOLDER_ID,
 		selectFolder,
 		updateFileContent,
 		type WelcomeLanguage,
 		type WorkspaceFile,
 		type WorkspaceSnapshot
-	} from '$lib/workspace/model';
-	import { applyDocumentTheme, isDarkTheme, parseTheme, type AppTheme } from '$lib/theme';
+	} from '#lib/workspace/model.js';
+	import {
+		loadSession,
+		saveSession,
+		sessionFromWorkspace,
+		writeSessionBackup,
+		type EditorSession
+	} from '#lib/workspace/session.js';
+	import { applyDocumentTheme, isDarkTheme, parseTheme, type AppTheme } from '#lib/theme.js';
 
 	const RUN_TIMEOUT_MS = 15_000;
 	const SAVE_DELAY_MS = 250;
-	const REMOTE_SYNC_DELAY_MS = 400;
-	const REMOTE_POLL_MS = 2_500;
 	const LOCAL_ONLY_KEY = 'kplus-coder-local-only';
 	const SHARED_PREVIEW_ID = 'shared-preview';
 
 	let workspace = $state(createInitialWorkspace());
 	let hydrated = $state(false);
-	let savedSignature = $state('');
-	let savedContents = $state<Record<string, string>>({});
 	type ConsoleBlock = {
 		id: number;
 		fileId: string;
@@ -144,6 +182,11 @@
 
 	let consoleSeq = 1;
 	let consoleBlocks = $state<ConsoleBlock[]>([]);
+	let pendingPythonInput = $state<number | null>(null);
+	let pythonInputValue = $state('');
+	let pythonInputElement = $state<HTMLInputElement | null>(null);
+	let runningPythonRunId = $state<number | null>(null);
+	let runningPythonFileId = $state('');
 	let runnerStatus = $state<RunnerStatus>('ready');
 	let pythonVersion = $state<string>();
 	let versionsOpen = $state(false);
@@ -156,37 +199,32 @@
 	let theme = $state<AppTheme>('light');
 	let clearOpen = $state(false);
 	let filesOpen = $state(false);
-	type SyncStatus = 'local' | 'connecting' | 'syncing' | 'synced' | 'conflict' | 'error';
-	type SyncConflict = {
-		local: WorkspaceSnapshot;
-		remote: RemoteWorkspace | null;
-		connection: WebDavConnection;
-		message: string;
-	};
+	type SyncStatus = 'local' | 'connecting' | 'syncing' | 'synced' | 'error';
 	let syncStatus = $state<SyncStatus>('local');
 	let syncError = $state('');
 	let webdavCredentials = $state<WebDavCredentials | null>(null);
 	let webdavConnection = $state<WebDavConnection | null>(null);
-	let webdavSyncState = $state<WebDavSyncState | null>(null);
-	let syncConflict = $state<SyncConflict | null>(null);
-	let conflictOpen = $state(false);
-	let filesAfterConflict = false;
-	let filesAfterLogin = false;
+	let filesAfterLogin = $state(false);
+	let saveAfterLogin = $state(false);
 	let loginOpen = $state(false);
 	let loginUsername = $state('');
 	let loginPassword = $state('');
 	let loginStay = $state(true);
+	let persistentCredentialStorage = $state(false);
 	let loginBusy = $state(false);
 	let loginError = $state('');
 	let webdavRemembered = $state(false);
-	let remoteSyncTimer: ReturnType<typeof setTimeout> | undefined;
-	let remotePollTimer: ReturnType<typeof setInterval> | undefined;
-	let remoteSyncQueue: Promise<void> = Promise.resolve();
-	let announceRemoteSave = false;
 	let explorerToken = $state(0);
 	let sharedCode = $state<string | null>(null);
 	let viewingShare = $state(false);
-	let saveChooser = $state(false);
+	let saveAsOpen = $state(false);
+	let saveAsToken = $state(0);
+	let wwschoolSaveBusy = $state(false);
+	let remoteTree = $state<WebDavTree | null>(null);
+	let remoteSelectedId = $state('');
+	let publishedContents = $state<Record<string, string>>({});
+	let remotePaths = $state<Record<string, string>>({});
+	let publishedShare = $state<string | null>(null);
 	let pane = $state<'code' | 'problems'>('code');
 	let terminalCollapsed = $state(false);
 	let previewConsoleOpen = $state(false);
@@ -205,6 +243,39 @@
 	let consoleViewport = $state<HTMLElement | null>(null);
 	let canUndo = $state(false);
 	let canRedo = $state(false);
+	let collaborationFileIds = $state<string[]>([]);
+	let collaborationConnected = $state(false);
+	let collaborationOpen = $state(false);
+	let collaborationRole = $state<'host' | 'guest' | null>(null);
+	let collaborationRoomId = $state('');
+	let collaborationPassphrase = $state('');
+	let collaborationJoinCode = $state('');
+	let collaborationBusy = $state(false);
+	let collaborationError = $state('');
+	let localUnsavedIds = $state(new Set<string>());
+	let pendingCloseTabId = $state<string | null>(null);
+	let pendingCloseShare = $state(false);
+	let saveTicket = 0;
+	let saveTimer: ReturnType<typeof setTimeout> | undefined;
+	let saveQueue = Promise.resolve();
+	let saveErrorAnnounced = false;
+	let parkedLocal: EditorSession | null = null;
+	let collaborationDoc = $state<Y.Doc | null>(null);
+	let collaborationRevision = $state(0);
+	let collaborationSocket: WebSocket | undefined;
+	let collaborationSendTimer: ReturnType<typeof setTimeout> | undefined;
+	let collaborationPendingUpdates: Uint8Array[] = [];
+	let collaborationDocListener: ((update: Uint8Array, origin: unknown) => void) | undefined;
+	let collaborationHostState: OpaqueHostState | null = null;
+	let collaborationClientState: OpaqueClientState | null = null;
+	let collaborationPairwiseKey: CryptoKey | null = null;
+	let collaborationGroupBytes: Uint8Array | null = null;
+	let collaborationGroupKey: CryptoKey | null = null;
+	let collaborationPeerId = '';
+	let collaborationHostPeerId = '';
+	let collaborationPendingHostSnapshot: WorkspaceSnapshot | null = null;
+	let collaborationPendingRoomId = '';
+	let collaborationStateTimer: ReturnType<typeof setTimeout> | undefined;
 	let codeEditor = $state<{
 		undoEdit: () => void;
 		redoEdit: () => void;
@@ -217,21 +288,22 @@
 	let lintId = 0;
 	let lintTimer: ReturnType<typeof setTimeout> | undefined;
 	let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-	let saveTimer: ReturnType<typeof setTimeout> | undefined;
-	let saveTicket = 0;
-	let saveQueue: Promise<unknown> = Promise.resolve();
-	let saveErrorAnnounced = false;
 	let runFileId = '';
 	let lintedFileId = '';
 	let createOpen = $state(false);
 
-	const activeFile = $derived(
-		workspace.files.find((file) => file.id === workspace.activeFileId) ?? workspace.files[0]
-	);
+	const activeFile = $derived.by(() => {
+		if (!workspace.openFileIds.includes(workspace.activeFileId)) return undefined;
+		return workspace.files.find((file) => file.id === workspace.activeFileId);
+	});
 	const fileCode = $derived(activeFile?.content ?? '');
 	const editorCode = $derived(viewingShare && sharedCode !== null ? sharedCode : fileCode);
 	const editorFileId = $derived(viewingShare ? SHARED_PREVIEW_ID : (activeFile?.id ?? ''));
-	const editorName = $derived(viewingShare ? 'geteilt.py' : (activeFile?.name ?? 'main.py'));
+	const editorSharedText = $derived(
+		collaborationDoc && activeFile ? collaborationDoc.getText(`content:${activeFile.id}`) : null
+	);
+	const editorEmpty = $derived(!activeFile && !(viewingShare && sharedCode !== null));
+	const editorName = $derived(viewingShare ? 'geteilt.py' : (activeFile?.name ?? ''));
 	const isHtml = $derived(isHtmlFile(editorName));
 	const isMarkdown = $derived(codeLanguage(editorName) === 'markdown');
 	const isJavaScript = $derived(codeLanguage(editorName) === 'javascript');
@@ -252,18 +324,29 @@
 			.map((id) => workspace.files.find((file) => file.id === id))
 			.filter((file): file is WorkspaceFile => Boolean(file))
 	);
-	const consoleFileId = $derived(previewTarget?.id ?? editorFileId);
+	const consoleFileId = $derived(runningPythonFileId || previewTarget?.id || editorFileId);
 	const fileConsole = $derived(consoleBlocks.filter((block) => block.fileId === consoleFileId));
 	const isRunning = $derived(runnerStatus === 'running');
 	const pythonLoading = $derived(isPython && runnerStatus === 'loading');
 	const stopping = $derived((isJavaScript && scriptRunning) || (!showsPreview && isRunning));
-	const dirty = $derived(hydrated && hasUnsavedChanges(workspace, savedSignature, savedContents));
+	const shareDirty = $derived(sharedCode !== null && sharedCode !== publishedShare);
 	const dirtyFileIds = $derived(
 		new Set(
 			workspace.files
-				.filter((file) => savedContents[file.id] !== file.content)
+				.filter(
+					(file) =>
+						localUnsavedIds.has(file.id) ||
+						(publishedContents[file.id] === undefined
+							? Boolean(file.content)
+							: publishedContents[file.id] !== file.content)
+				)
 				.map((file) => file.id)
 		)
+	);
+	const dirty = $derived(hydrated && (shareDirty || dirtyFileIds.size > 0));
+	const saveTree = $derived(
+		remoteTree ??
+			(webdavConnection ? emptyWebDavTree(webdavConnection) : { folders: [], files: [] })
 	);
 	const pythonStatus = $derived.by(() => {
 		if (runnerStatus === 'loading') return 'wird geladen';
@@ -358,6 +441,24 @@
 		return updated;
 	}
 
+	function requestPythonInput(id: number) {
+		pendingPythonInput = id;
+		pythonInputValue = '';
+		scrollConsoleToEnd();
+		void tick().then(() => pythonInputElement?.focus());
+	}
+
+	function submitConsoleInput(event: SubmitEvent) {
+		event.preventDefault();
+		if (pendingPythonInput === null) return;
+		if (!submitPythonInput(pythonInputValue)) {
+			announce('Eingabe zu lang. Bitte auf maximal 64 KB kürzen.');
+			return;
+		}
+		pendingPythonInput = null;
+		pythonInputValue = '';
+	}
+
 	function scrollConsoleToEnd() {
 		const pin = () => {
 			if (!consoleViewport) return;
@@ -373,6 +474,10 @@
 	}
 
 	function clearConsole() {
+		if (pendingPythonInput !== null) {
+			announce('Bitte erst die Eingabe senden oder die Ausführung stoppen.');
+			return;
+		}
 		const fileId = consoleFileId;
 		commitConsole(consoleBlocks.filter((block) => block.fileId !== fileId));
 	}
@@ -381,246 +486,11 @@
 		commitConsole(consoleBlocks.filter((block) => block.id !== id));
 	}
 
-	function markSaved(snapshot: WorkspaceSnapshot) {
-		savedSignature = structureSignature(snapshot);
-		savedContents = Object.fromEntries(snapshot.files.map((file) => [file.id, file.content]));
-	}
-
-	function enqueueSave(
-		snapshot: WorkspaceSnapshot,
-		ticket: number,
-		savedAt: number
-	): Promise<boolean> {
-		const job = saveQueue.then(async () => {
-			if (ticket !== saveTicket) return true;
-			try {
-				await saveWorkspace(snapshot, savedAt);
-				if (ticket !== saveTicket) return true;
-				markSaved(snapshot);
-				saveErrorAnnounced = false;
-				return true;
-			} catch {
-				if (ticket === saveTicket && !saveErrorAnnounced) {
-					saveErrorAnnounced = true;
-					announce('Speichern im Browser ist fehlgeschlagen.');
-				}
-				return false;
-			}
-		});
-		saveQueue = job.then(
-			() => undefined,
-			() => undefined
-		);
-		return job;
-	}
-
-	function flushWorkspace() {
-		if (!hydrated) return;
-		if (saveTimer) clearTimeout(saveTimer);
-		const snapshot = $state.snapshot(workspace) as WorkspaceSnapshot;
-		const ticket = ++saveTicket;
-		const savedAt = writeWorkspaceBackup(snapshot);
-		void enqueueSave(snapshot, ticket, savedAt);
-	}
-
-	function enqueueRemote(task: () => Promise<void>) {
-		remoteSyncQueue = remoteSyncQueue.then(task, task);
-	}
-
-	function queueRemoteSync(snapshot: WorkspaceSnapshot) {
-		if (
-			!webdavCredentials ||
-			!webdavConnection ||
-			!webdavSyncState ||
-			(syncStatus !== 'synced' && syncStatus !== 'syncing')
-		) {
-			return;
-		}
-		if (remoteSyncTimer) clearTimeout(remoteSyncTimer);
-		const copy = structuredClone(snapshot);
-		remoteSyncTimer = setTimeout(() => {
-			enqueueRemote(() => syncRemoteSnapshot(copy));
-		}, REMOTE_SYNC_DELAY_MS);
-	}
-
-	function pushRemoteWorkspace(options?: { announce?: boolean }) {
-		if (!webdavCredentials || !webdavConnection || !webdavSyncState) return;
-		if (syncStatus === 'conflict') return;
-		announceRemoteSave = Boolean(options?.announce);
-		flushWorkspace();
-		queueRemoteSync($state.snapshot(workspace) as WorkspaceSnapshot);
-	}
-
-	function queueRemotePull() {
-		if (!webdavCredentials || !webdavConnection || syncStatus !== 'synced') return;
-		enqueueRemote(() => pullRemoteWorkspace());
-	}
-
-	function stopRemoteWatch() {
-		if (remotePollTimer) {
-			clearInterval(remotePollTimer);
-			remotePollTimer = undefined;
-		}
-	}
-
-	function startRemoteWatch() {
-		stopRemoteWatch();
-		remotePollTimer = setInterval(() => {
-			if (document.visibilityState !== 'visible') return;
-			queueRemotePull();
-		}, REMOTE_POLL_MS);
-	}
-
-	function nextSyncState(
-		connection: WebDavConnection,
-		hash: string,
-		etag?: string | null
-	): WebDavSyncState {
-		return {
-			...connection,
-			lastSyncedHash: hash,
-			lastSyncedEtag: etag || undefined
-		};
-	}
-
-	async function syncRemoteSnapshot(snapshot: WorkspaceSnapshot) {
-		const credentials = webdavCredentials;
-		const connection = webdavConnection;
-		const previous = webdavSyncState;
-		if (!credentials || !connection || !previous || syncStatus === 'conflict') return;
-		syncStatus = 'syncing';
-		try {
-			const remote = await writeWebDavWorkspace(
-				credentials,
-				connection,
-				snapshot,
-				previous.lastSyncedHash
-			);
-			const nextState = nextSyncState(connection, remote.hash, remote.etag);
-			await saveWebDavSyncState(nextState);
-			webdavSyncState = nextState;
-			syncError = '';
-			syncStatus = 'synced';
-			if (announceRemoteSave) {
-				announceRemoteSave = false;
-				announce('Mit wwschool gespeichert');
-			}
-		} catch (error) {
-			announceRemoteSave = false;
-			if (error instanceof WebDavConflictError) {
-				const local = $state.snapshot(workspace) as WorkspaceSnapshot;
-				syncConflict = {
-					local,
-					remote: error.remote,
-					connection,
-					message: error.message
-				};
-				syncStatus = 'conflict';
-				conflictOpen = true;
-				return;
-			}
-			syncError =
-				error instanceof Error ? error.message : 'Die Synchronisierung ist fehlgeschlagen.';
-			syncStatus = 'error';
-			announce(syncError);
-		}
-	}
-
-	async function pullRemoteWorkspace() {
-		const credentials = webdavCredentials;
-		const connection = webdavConnection;
-		const previous = webdavSyncState;
-		if (!credentials || !connection || !previous || syncStatus !== 'synced') return;
-		try {
-			if (previous.lastSyncedEtag) {
-				try {
-					const probe = await probeWebDavWorkspace(credentials, connection);
-					if (probe?.exists && probe.etag === previous.lastSyncedEtag) return;
-				} catch {
-					// Ohne ETag wird der volle Stand gelesen.
-				}
-			}
-			const remote = await readWebDavWorkspace(credentials, connection);
-			if (syncStatus !== 'synced') return;
-			const local = $state.snapshot(workspace) as WorkspaceSnapshot;
-			const localHash = await hashWorkspace(local);
-			if (!remote) {
-				showSyncConflict(
-					local,
-					null,
-					connection,
-					'Die zuvor synchronisierte Workspace-Datei fehlt auf wwschool. Der lokale Stand bleibt erhalten.',
-					false
-				);
-				return;
-			}
-			if (remote.hash === previous.lastSyncedHash) {
-				if (remote.etag && remote.etag !== previous.lastSyncedEtag) {
-					const nextState = nextSyncState(connection, remote.hash, remote.etag);
-					await saveWebDavSyncState(nextState);
-					webdavSyncState = nextState;
-				}
-				return;
-			}
-			if (localHash === previous.lastSyncedHash) {
-				await adoptRemoteWorkspace(remote, connection);
-				return;
-			}
-			if (localHash === remote.hash) {
-				const nextState = nextSyncState(connection, remote.hash, remote.etag);
-				await saveWebDavSyncState(nextState);
-				webdavSyncState = nextState;
-				return;
-			}
-			showSyncConflict(
-				local,
-				remote,
-				connection,
-				'Lokal und auf wwschool liegen unterschiedliche Versionen.',
-				false
-			);
-		} catch (error) {
-			if (syncStatus !== 'synced') return;
-			syncError =
-				error instanceof Error ? error.message : 'Die Synchronisierung ist fehlgeschlagen.';
-			syncStatus = 'error';
-			announce(syncError);
-		}
-	}
-
-	async function persistWorkspaceNow(snapshot: WorkspaceSnapshot) {
-		if (saveTimer) clearTimeout(saveTimer);
-		const ticket = ++saveTicket;
-		const savedAt = writeWorkspaceBackup(snapshot);
-		if (!(await enqueueSave(snapshot, ticket, savedAt))) {
-			throw new WebDavError('Die lokale Workspace konnte nicht gespeichert werden.');
-		}
-	}
-
-	async function adoptRemoteWorkspace(remote: RemoteWorkspace, connection: WebDavConnection) {
-		syncStatus = 'connecting';
-		const nextState = nextSyncState(connection, remote.hash, remote.etag);
-		await saveWebDavSyncState(nextState);
-		webdavSyncState = nextState;
-		await persistWorkspaceNow(remote.snapshot);
-		workspace = remote.snapshot;
-		markSaved(remote.snapshot);
-		syncStatus = 'synced';
-		syncError = '';
-	}
-
-	function showSyncConflict(
-		local: WorkspaceSnapshot,
-		remote: RemoteWorkspace | null,
-		connection: WebDavConnection,
-		message: string,
-		openFiles: boolean
-	) {
-		syncConflict = { local: structuredClone(local), remote, connection, message };
-		filesAfterConflict = openFiles;
-		syncStatus = 'conflict';
-		conflictOpen = true;
-		loginOpen = false;
+	function markFilePublished(fileId: string, content: string, path?: string) {
+		const next = { ...publishedContents, [fileId]: content };
+		publishedContents = next;
+		localUnsavedIds = new Set([...localUnsavedIds].filter((id) => id !== fileId));
+		if (path) remotePaths = { ...remotePaths, [fileId]: path };
 	}
 
 	async function startWebDavSession(
@@ -637,65 +507,28 @@
 		}
 		webdavCredentials = credentials;
 		webdavConnection = connection;
-		const [remote, storedState] = await Promise.all([
-			readWebDavWorkspace(credentials, connection),
-			loadWebDavSyncState()
-		]);
-		const previous = storedState?.workspaceHref === connection.workspaceHref ? storedState : null;
-		webdavSyncState = previous;
-		const local = $state.snapshot(workspace) as WorkspaceSnapshot;
-		const localHash = await hashWorkspace(local);
-
-		if (remote) {
-			if (localHash === remote.hash) {
-				const state = nextSyncState(connection, remote.hash, remote.etag);
-				await saveWebDavSyncState(state);
-				webdavSyncState = state;
-				syncStatus = 'synced';
-			} else if (previous && localHash === previous.lastSyncedHash) {
-				await adoptRemoteWorkspace(remote, connection);
-			} else if (previous && remote.hash === previous.lastSyncedHash) {
-				const uploaded = await writeWebDavWorkspace(credentials, connection, local, remote.hash);
-				const state = nextSyncState(connection, uploaded.hash, uploaded.etag);
-				await saveWebDavSyncState(state);
-				webdavSyncState = state;
-				syncStatus = 'synced';
-			} else if (!previous && isEmptyWorkspace(local)) {
-				await adoptRemoteWorkspace(remote, connection);
-			} else {
-				showSyncConflict(
-					local,
-					remote,
-					connection,
-					'Lokal und auf wwschool liegen unterschiedliche Versionen.',
-					false
-				);
-				return;
-			}
-		} else if (previous) {
-			showSyncConflict(
-				local,
-				null,
-				connection,
-				'Die zuvor synchronisierte Workspace-Datei fehlt auf wwschool. Der lokale Stand bleibt erhalten.',
-				false
-			);
-			return;
-		} else {
-			const uploaded = await writeWebDavWorkspace(credentials, connection, local, null);
-			const state = nextSyncState(connection, uploaded.hash, uploaded.etag);
-			await saveWebDavSyncState(state);
-			webdavSyncState = state;
-			syncStatus = 'synced';
-		}
-
+		await saveWebDavSyncState(connection);
+		syncStatus = 'synced';
 		writeLocalOnly(false);
-		if (filesAfterLogin) {
-			showFilesManager();
-			filesAfterLogin = false;
+		try {
+			await refreshRemoteTree();
+		} catch (error) {
+			announce(
+				error instanceof Error ? error.message : 'Die Dateiablage konnte nicht gelesen werden.'
+			);
 		}
+		const shouldSave = saveAfterLogin;
+		const shouldFiles = filesAfterLogin;
+		saveAfterLogin = false;
+		filesAfterLogin = false;
 		loginOpen = false;
 		loginPassword = '';
+		if (shouldSave) {
+			await tick();
+			openSaveDialog();
+		} else if (shouldFiles) {
+			showFilesManager();
+		}
 	}
 
 	function readLocalOnly(): boolean {
@@ -716,6 +549,7 @@
 	}
 
 	function continueLocally() {
+		if (saveAfterLogin) return;
 		writeLocalOnly(true);
 		loginPassword = '';
 		loginError = '';
@@ -740,8 +574,8 @@
 			});
 			announce(
 				loginStay
-					? 'Mit wwschool verbunden'
-					: 'Mit wwschool verbunden. Die Anmeldung gilt nur für diese Sitzung.'
+					? `Mit wwschool verbunden. Ordner ${CODER_FOLDER_NAME} ist bereit.`
+					: `Mit wwschool verbunden. Die Anmeldung gilt nur für diese Sitzung.`
 			);
 		} catch (error) {
 			loginError = error instanceof Error ? error.message : 'Die Anmeldung ist fehlgeschlagen.';
@@ -755,20 +589,19 @@
 	function openLogin() {
 		settingsOpen = false;
 		filesAfterLogin = false;
+		saveAfterLogin = false;
 		loginError = syncError;
 		loginOpen = true;
 	}
 
 	async function logoutWebDav() {
 		settingsOpen = false;
-		stopRemoteWatch();
-		if (remoteSyncTimer) clearTimeout(remoteSyncTimer);
 		await clearWebDavCredentials();
 		webdavCredentials = null;
 		webdavConnection = null;
 		webdavRemembered = false;
-		syncConflict = null;
-		conflictOpen = false;
+		remoteTree = null;
+		saveAsOpen = false;
 		syncStatus = 'local';
 		syncError = '';
 		loginOpen = false;
@@ -792,88 +625,69 @@
 		}
 	}
 
-	async function useRemoteVersion() {
-		const conflict = syncConflict;
-		const credentials = webdavCredentials;
-		if (!conflict || !credentials) return;
-		try {
-			const current = await readWebDavWorkspace(credentials, conflict.connection);
-			if (!current) {
-				throw new WebDavError('Die Workspace-Datei ist auf wwschool nicht mehr vorhanden.');
+	function captureSession(): EditorSession {
+		return sessionFromWorkspace($state.snapshot(workspace) as WorkspaceSnapshot, {
+			publishedContents: { ...publishedContents },
+			localUnsavedIds: [...localUnsavedIds],
+			remotePaths: { ...remotePaths }
+		});
+	}
+
+	function applySession(session: EditorSession) {
+		workspace = session.workspace;
+		publishedContents = { ...session.publishedContents };
+		localUnsavedIds = new Set(session.localUnsavedIds);
+		remotePaths = { ...session.remotePaths };
+	}
+
+	function enqueueSessionSave(session: EditorSession, ticket: number, savedAt: number) {
+		const job = saveQueue.then(async () => {
+			if (ticket !== saveTicket || collaborationRole === 'guest') return;
+			try {
+				await saveSession(session, savedAt);
+				saveErrorAnnounced = false;
+			} catch {
+				if (ticket === saveTicket && !saveErrorAnnounced) {
+					saveErrorAnnounced = true;
+					announce('Der Editorstand konnte nicht gespeichert werden.');
+				}
 			}
-			if (current.hash !== conflict.remote?.hash) {
-				syncConflict = {
-					...conflict,
-					remote: current,
-					message: 'Der Serverstand hat sich erneut geändert. Prüfe beide Stände noch einmal.'
-				};
-				return;
-			}
-			await adoptRemoteWorkspace(current, conflict.connection);
-			syncConflict = null;
-			conflictOpen = false;
-			if (filesAfterConflict) showFilesManager();
-			announce('Der Stand von wwschool wurde geladen.');
-		} catch (error) {
-			syncError =
-				error instanceof Error ? error.message : 'Der Serverstand konnte nicht geladen werden.';
-			announce(syncError);
+		});
+		saveQueue = job.then(
+			() => undefined,
+			() => undefined
+		);
+	}
+
+	function flushEditorSession() {
+		if (!hydrated || collaborationRole === 'guest') return;
+		if (saveTimer) clearTimeout(saveTimer);
+		const session = captureSession();
+		const ticket = ++saveTicket;
+		const savedAt = writeSessionBackup(session);
+		enqueueSessionSave(session, ticket, savedAt);
+	}
+
+	function parkLocalWorkspace() {
+		flushEditorSession();
+		parkedLocal = captureSession();
+	}
+
+	function restoreParkedWorkspace() {
+		if (!parkedLocal) return;
+		applySession(parkedLocal);
+		parkedLocal = null;
+	}
+
+	function openCollaborationFile(snapshot: WorkspaceSnapshot) {
+		if (snapshot.openFileIds.length) {
+			const active = snapshot.openFileIds.includes(snapshot.activeFileId)
+				? snapshot.activeFileId
+				: snapshot.openFileIds[0];
+			return active ? openFile(snapshot, active) : snapshot;
 		}
-	}
-
-	async function useLocalVersion() {
-		const conflict = syncConflict;
-		const credentials = webdavCredentials;
-		if (!conflict || !credentials) return;
-		const local = $state.snapshot(workspace) as WorkspaceSnapshot;
-		try {
-			const uploaded = await writeWebDavWorkspace(
-				credentials,
-				conflict.connection,
-				local,
-				conflict.remote?.hash ?? null
-			);
-			const state = nextSyncState(conflict.connection, uploaded.hash, uploaded.etag);
-			await saveWebDavSyncState(state);
-			webdavSyncState = state;
-			await persistWorkspaceNow(local);
-			markSaved(local);
-			syncConflict = null;
-			conflictOpen = false;
-			syncStatus = 'synced';
-			if (filesAfterConflict) showFilesManager();
-			announce('Der lokale Stand wurde übernommen.');
-		} catch (error) {
-			if (error instanceof WebDavConflictError) {
-				syncConflict = { ...conflict, local, remote: error.remote, message: error.message };
-				syncStatus = 'conflict';
-				return;
-			}
-			syncError =
-				error instanceof Error
-					? error.message
-					: 'Der lokale Stand konnte nicht hochgeladen werden.';
-			announce(syncError);
-		}
-	}
-
-	function openSyncConflict() {
-		if (syncConflict) conflictOpen = true;
-	}
-
-	function handleBeforeUnload(event: BeforeUnloadEvent) {
-		if (!hydrated) return;
-		flushWorkspace();
-		if (!dirty && sharedCode === null) return;
-		event.preventDefault();
-		event.returnValue = 'Es gibt ungespeicherte Änderungen.';
-	}
-
-	function handleVisibility() {
-		if (document.visibilityState === 'hidden') {
-			flushWorkspace();
-			pushRemoteWorkspace();
-		} else queueRemotePull();
+		const first = snapshot.files[0];
+		return first ? openFile(snapshot, first.id) : snapshot;
 	}
 
 	function editActiveFile(value: string) {
@@ -882,6 +696,7 @@
 			sharedCode = value;
 			return;
 		}
+		if (editorEmpty) return;
 		const next = updateFileContent(workspace, workspace.activeFileId, value);
 		if (next === workspace) return;
 		workspace = next;
@@ -891,6 +706,19 @@
 		const activeChanged = next.activeFileId !== workspace.activeFileId;
 		workspace = next;
 		if (activeChanged) pane = 'code';
+	}
+
+	function applyExplorer(next: WorkspaceSnapshot) {
+		if (webdavConnection) {
+			remoteSelectedId = next.selectedFolderId;
+			return;
+		}
+		const previousIds = new Set(workspace.files.map((file) => file.id));
+		const createdIds = next.files
+			.filter((file) => !previousIds.has(file.id))
+			.map((file) => file.id);
+		if (createdIds.length) localUnsavedIds = new Set([...localUnsavedIds, ...createdIds]);
+		applyWorkspace(next);
 	}
 
 	function showShare() {
@@ -903,8 +731,18 @@
 	function discardShare() {
 		sharedCode = null;
 		viewingShare = false;
-		saveChooser = false;
+		publishedShare = null;
+		pendingCloseShare = false;
 		clearSharedImportUrl();
+	}
+
+	function requestCloseShare() {
+		if (shareDirty) {
+			pendingCloseShare = true;
+			pendingCloseTabId = null;
+			return;
+		}
+		discardShare();
 	}
 
 	function showFile(fileId: string) {
@@ -916,12 +754,32 @@
 
 	function closeTab(fileId: string) {
 		applyWorkspace(closeFile(workspace, fileId));
+		pendingCloseTabId = null;
+	}
+
+	function requestCloseTab(fileId: string) {
+		if (dirtyFileIds.has(fileId)) {
+			pendingCloseTabId = fileId;
+			pendingCloseShare = false;
+			return;
+		}
+		closeTab(fileId);
+	}
+
+	function confirmClosePendingTab() {
+		if (pendingCloseShare) {
+			discardShare();
+			return;
+		}
+		if (pendingCloseTabId) closeTab(pendingCloseTabId);
 	}
 
 	function createNamedFile(name: string) {
-		const folderId = activeFile?.folderId;
-		if (!folderId) return;
-		applyWorkspace(createFile(workspace, folderId, name));
+		const folderId = activeFile?.folderId ?? workspace.selectedFolderId ?? ROOT_FOLDER_ID;
+		const next = createFile(workspace, folderId, name);
+		const created = next.files.find((file) => !workspace.files.some((item) => item.id === file.id));
+		if (created) localUnsavedIds = new Set([...localUnsavedIds, created.id]);
+		applyWorkspace(next);
 		pane = 'code';
 		if (isHtmlFile(name) || codeLanguage(name) === 'markdown') previewConsoleOpen = false;
 		void tick().then(() => codeEditor?.focusEditor());
@@ -1024,26 +882,68 @@
 	function restoredWorkspace() {
 		sharedCode = null;
 		viewingShare = false;
-		saveChooser = false;
+		publishedShare = null;
 		pane = 'code';
 		clearSharedImportUrl();
 		void tick().then(() => codeEditor?.focusEditor());
 	}
 
+	function remoteExplorerSnapshot(): WorkspaceSnapshot {
+		const tree = remoteTree ?? (webdavConnection ? emptyWebDavTree(webdavConnection) : null);
+		if (!tree) return workspace;
+		const selected =
+			tree.folders.some((folder) => folder.id === remoteSelectedId) && remoteSelectedId
+				? remoteSelectedId
+				: (tree.folders[0]?.id ?? '');
+		return {
+			version: workspace.version,
+			folders: tree.folders.map(({ id, name, parentId }) => ({ id, name, parentId })),
+			files: tree.files.map((file) => ({
+				id: file.id,
+				name: file.name,
+				folderId: file.folderId,
+				content: '',
+				updatedAt: 0
+			})),
+			openFileIds: [],
+			activeFileId: '',
+			selectedFolderId: selected,
+			layout: workspace.layout,
+			welcomed: true
+		};
+	}
+
+	async function refreshRemoteTree() {
+		const credentials = webdavCredentials;
+		const connection = webdavConnection;
+		if (!credentials || !connection) return;
+		remoteTree = await listWebDavProjectTree(credentials, connection);
+		if (!remoteSelectedId || !remoteTree.folders.some((folder) => folder.id === remoteSelectedId)) {
+			remoteSelectedId = remoteTree.folders[0]?.id ?? '';
+		}
+	}
+
 	function showFilesManager() {
-		const folderId = activeFile?.folderId;
-		if (folderId && workspace.selectedFolderId !== folderId) {
-			workspace = selectFolder(workspace, folderId);
+		if (!webdavConnection) {
+			const folderId = activeFile?.folderId;
+			if (folderId && workspace.selectedFolderId !== folderId) {
+				workspace = selectFolder(workspace, folderId);
+			}
 		}
 		explorerToken += 1;
 		filesOpen = true;
 	}
 
-	function openFilesManager(saveSharedFile = false) {
-		saveChooser = saveSharedFile;
+	function openFilesManager() {
 		if (webdavCredentials && webdavConnection && syncStatus !== 'error') {
-			showFilesManager();
-			if (syncStatus === 'conflict') openSyncConflict();
+			void refreshRemoteTree()
+				.then(() => showFilesManager())
+				.catch((error) => {
+					syncError =
+						error instanceof Error ? error.message : 'Die Dateiablage konnte nicht gelesen werden.';
+					announce(syncError);
+					showFilesManager();
+				});
 			return;
 		}
 		if (readLocalOnly()) {
@@ -1051,6 +951,7 @@
 			return;
 		}
 		filesAfterLogin = true;
+		saveAfterLogin = false;
 		loginError = syncError;
 		loginOpen = true;
 	}
@@ -1059,42 +960,173 @@
 		openFilesManager();
 	}
 
-	function openSaveShare() {
-		openFilesManager(true);
+	function openSaveDialog() {
+		saveAsToken += 1;
+		saveAsOpen = true;
 	}
 
-	function saveShared(folderId: string) {
-		if (sharedCode === null) return;
-		const existing = workspace.files.find(
-			(file) => file.folderId === folderId && file.name.toLocaleLowerCase('de') === 'geteilt.py'
-		);
-		const next = existing
-			? openFile(updateFileContent(workspace, existing.id, sharedCode), existing.id)
-			: importFiles(workspace, folderId, [{ name: 'geteilt.py', content: sharedCode }]);
-		sharedCode = null;
-		viewingShare = false;
-		saveChooser = false;
-		filesOpen = false;
+	function openSave() {
+		if (editorEmpty) return;
+		if (webdavCredentials && webdavConnection && syncStatus !== 'connecting') {
+			void refreshRemoteTree()
+				.then(() => openSaveDialog())
+				.catch((error) => {
+					announce(
+						error instanceof Error ? error.message : 'Die Dateiablage konnte nicht gelesen werden.'
+					);
+					openSaveDialog();
+				});
+			return;
+		}
+		saveAfterLogin = true;
+		filesAfterLogin = false;
+		loginError = syncError;
+		loginOpen = true;
+	}
+
+	async function openRemoteFile(href: string) {
+		const credentials = webdavCredentials;
+		const connection = webdavConnection;
+		const remote = remoteTree?.files.find((file) => file.id === href);
+		if (!credentials || !connection || !remote) return;
+		try {
+			const content = await readWebDavFile(credentials, href);
+			const path = coderProjectPath(
+				webDavRelativeDir(connection.projectHref, remote.folderId),
+				remote.name
+			);
+			const existing = workspace.files.find((file) => remotePaths[file.id] === path);
+			if (existing) {
+				if (publishedContents[existing.id] === existing.content) {
+					const next = openFile(updateFileContent(workspace, existing.id, content), existing.id);
+					applyWorkspace(next);
+					markFilePublished(existing.id, content, path);
+				} else {
+					applyWorkspace(openFile(workspace, existing.id));
+				}
+				return;
+			}
+			const next = createFile(workspace, ROOT_FOLDER_ID, remote.name, content);
+			const created = next.files.find(
+				(file) => !workspace.files.some((item) => item.id === file.id)
+			);
+			applyWorkspace(next);
+			if (created) markFilePublished(created.id, content, path);
+		} catch (error) {
+			announce(error instanceof Error ? error.message : 'Die Datei konnte nicht geöffnet werden.');
+		}
+	}
+
+	async function createRemoteFolder(parentHref: string, name: string) {
+		if (!webdavCredentials || !webdavConnection) return;
+		try {
+			await createWebDavFolder(webdavCredentials, webdavConnection, parentHref, name);
+			await refreshRemoteTree();
+			announce(`Ordner „${name}“ in wwschool angelegt.`);
+		} catch (error) {
+			announce(error instanceof Error ? error.message : 'Der Ordner konnte nicht angelegt werden.');
+		}
+	}
+
+	async function createRemoteFile(folderHref: string, name: string) {
+		if (!webdavCredentials || !webdavConnection) return;
+		try {
+			await refreshRemoteTree();
+			const priorIds = new Set(remoteTree?.files.map((file) => file.id) ?? []);
+			await createWebDavFile(webdavCredentials, webdavConnection, folderHref, name);
+			await refreshRemoteTree();
+			const newFiles =
+				remoteTree?.files.filter(
+					(file) => !priorIds.has(file.id) && file.folderId === folderHref
+				) ?? [];
+			const created =
+				newFiles.find(
+					(file) => file.name.toLocaleLowerCase('de') === name.toLocaleLowerCase('de')
+				) ?? (newFiles.length === 1 ? newFiles[0] : undefined);
+			if (!created) throw new Error('Die neue Datei wurde in wwschool nicht gefunden.');
+			await openRemoteFile(created.href);
+			filesOpen = false;
+			announce(`Datei „${name}“ in wwschool angelegt und geöffnet.`);
+		} catch (error) {
+			announce(error instanceof Error ? error.message : 'Die Datei konnte nicht angelegt werden.');
+		}
+	}
+
+	function importWorkspaceFiles(files: { name: string; content: string }[]) {
+		const next = importFiles(workspace, workspace.selectedFolderId, files);
+		const previousIds = new Set(workspace.files.map((file) => file.id));
+		const createdIds = next.files
+			.filter((file) => !previousIds.has(file.id))
+			.map((file) => file.id);
+		if (createdIds.length) localUnsavedIds = new Set([...localUnsavedIds, ...createdIds]);
 		applyWorkspace(next);
-		clearSharedImportUrl();
-		announce(
-			webdavCredentials
-				? 'Geteilte Datei gespeichert. Sie wird mit wwschool abgeglichen.'
-				: 'Geteilte Datei gespeichert'
-		);
+		if (createdIds.length) pane = 'code';
+	}
+
+	async function commitSaveAs(folderId: string, rawName: string) {
+		const credentials = webdavCredentials;
+		const connection = webdavConnection;
+		if (!credentials || !connection || wwschoolSaveBusy) return;
+		const filename = acceptedFileName(rawName);
+		if (!filename) {
+			announce(newFileNameError(rawName) ?? 'Ungültiger Dateiname.');
+			return;
+		}
+		wwschoolSaveBusy = true;
+		syncStatus = 'syncing';
+		try {
+			const relativeDir = webDavRelativeDir(connection.projectHref, folderId);
+			await writeWebDavProjectFile(credentials, connection, relativeDir, filename, editorCode);
+			const path = coderProjectPath(relativeDir, filename);
+			if (viewingShare && sharedCode !== null) {
+				const next = importFiles(workspace, ROOT_FOLDER_ID, [
+					{ name: filename, content: editorCode }
+				]);
+				const created = next.files.find(
+					(file) => !workspace.files.some((item) => item.id === file.id)
+				);
+				applyWorkspace(next);
+				if (created) markFilePublished(created.id, editorCode, path);
+				sharedCode = null;
+				viewingShare = false;
+				publishedShare = null;
+				clearSharedImportUrl();
+			} else if (activeFile) {
+				let next = updateFileContent(workspace, activeFile.id, editorCode);
+				if (filename !== activeFile.name) next = renameFile(next, activeFile.id, filename);
+				applyWorkspace(next);
+				markFilePublished(activeFile.id, editorCode, path);
+			}
+			await refreshRemoteTree();
+			saveAsOpen = false;
+			syncError = '';
+			syncStatus = 'synced';
+			announce(`Nach wwschool gelegt: ${path}`);
+		} catch (error) {
+			syncError =
+				error instanceof Error
+					? error.message
+					: 'Die Datei konnte nicht auf wwschool gelegt werden.';
+			syncStatus = 'error';
+			announce(syncError);
+		} finally {
+			wwschoolSaveBusy = false;
+		}
 	}
 
 	function undo() {
+		if (editorEmpty) return;
 		codeEditor?.undoEdit();
 	}
 
 	function redo() {
+		if (editorEmpty) return;
 		codeEditor?.redoEdit();
 	}
 
 	function startRuffWorker() {
 		if (ruffWorker) return;
-		const worker = new Worker(new URL('$lib/runner/ruff.worker.ts', import.meta.url), {
+		const worker = new Worker(new URL('../lib/runner/ruff.worker.ts', import.meta.url), {
 			type: 'module'
 		});
 		ruffWorker = worker;
@@ -1181,6 +1213,7 @@
 	}
 
 	function runCode() {
+		if (editorEmpty) return;
 		if (previewing) {
 			terminalCollapsed = false;
 			previewNonce += 1;
@@ -1201,18 +1234,27 @@
 		}
 		if (runnerStatus === 'loading') return;
 		terminalCollapsed = false;
+		pendingPythonInput = null;
 		runId += 1;
 		const payload = runPayload();
 		const fileId = editorFileId;
 		const thisId = runId;
 		runFileId = fileId;
+		runningPythonRunId = thisId;
+		runningPythonFileId = fileId;
 		beginRun(thisId, payload.filename, fileId);
 		void runPython({
 			code: editorCode,
 			filename: payload.filename,
 			files: payload.files,
-			onOutput: (stream, text) => appendRunOutput(thisId, stream, text)
+			onOutput: (stream, text) => appendRunOutput(thisId, stream, text),
+			onInput: () => requestPythonInput(thisId)
 		}).then((result) => {
+			if (runningPythonRunId === thisId) {
+				runningPythonRunId = null;
+				runningPythonFileId = '';
+			}
+			if (pendingPythonInput === thisId) pendingPythonInput = null;
 			if (result.failed) {
 				const note = result.error || result.stderr;
 				if (
@@ -1237,6 +1279,8 @@
 	}
 
 	function stopRun(message: string) {
+		pendingPythonInput = null;
+		pythonInputValue = '';
 		stopPython(message);
 	}
 
@@ -1246,11 +1290,13 @@
 			announce('Code gelöscht');
 			return;
 		}
+		if (editorEmpty) return;
 		workspace = updateFileContent(workspace, workspace.activeFileId, '');
 		announce('Code gelöscht');
 	}
 
 	function downloadCode() {
+		if (editorEmpty) return;
 		const filename = editorName;
 		const blobUrl = URL.createObjectURL(
 			new Blob([editorCode], {
@@ -1262,31 +1308,424 @@
 		link.download = filename;
 		link.click();
 		URL.revokeObjectURL(blobUrl);
+		if (viewingShare && sharedCode !== null) publishedShare = editorCode;
+		else if (activeFile) markFilePublished(activeFile.id, editorCode);
 		announce(`${filename} heruntergeladen`);
 	}
 
-	async function downloadDatabase() {
+	type RelayFrame = {
+		type?: string;
+		roomId?: string;
+		peerId?: string;
+		hostPeerId?: string;
+		from?: string;
+		to?: string;
+		payload?: Record<string, unknown>;
+	};
+
+	function relaySend(socket: WebSocket, message: unknown) {
+		if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+	}
+
+	async function connectCollaborationRelay(): Promise<WebSocket> {
+		const socket = new WebSocket(COLLABORATION_RELAY_URL);
+		await new Promise<void>((resolve, reject) => {
+			socket.addEventListener('open', () => resolve(), { once: true });
+			socket.addEventListener(
+				'error',
+				() => reject(new Error('Der Zusammenarbeitsserver ist nicht erreichbar.')),
+				{ once: true }
+			);
+		});
+		return socket;
+	}
+
+	function installCollaborationSocket(socket: WebSocket) {
+		socket.onmessage = (event: MessageEvent<string>) => {
+			if (typeof event.data !== 'string') return;
+			void Promise.resolve()
+				.then(() => handleCollaborationFrame(socket, JSON.parse(event.data) as RelayFrame))
+				.catch((error) => {
+					collaborationError =
+						error instanceof Error
+							? error.message
+							: 'Die verschlüsselte Sitzung ist fehlgeschlagen.';
+					socket.close(4002, 'Zusammenarbeit fehlgeschlagen');
+				});
+		};
+		socket.onclose = () => {
+			if (collaborationSocket !== socket) return;
+			const wasConnected = collaborationConnected;
+			if (!wasConnected && !collaborationError) {
+				collaborationError = 'Sitzung nicht gefunden. Prüfe den Verbindungscode.';
+			}
+			endCollaborationSession(false);
+			if (wasConnected) announce('Die gemeinsame Sitzung wurde beendet.');
+		};
+		socket.onerror = () => {
+			if (!collaborationConnected) {
+				collaborationError = 'Verbindung zum Zusammenarbeitsserver fehlgeschlagen.';
+			}
+		};
+	}
+
+	function attachCollaborationDocument(
+		doc: Y.Doc,
+		socket: WebSocket,
+		roomId: string,
+		peerId: string
+	) {
+		const listener = (update: Uint8Array, origin: unknown) => {
+			collaborationRevision += 1;
+			if (!collaborationStateTimer) {
+				collaborationStateTimer = setTimeout(() => {
+					collaborationStateTimer = undefined;
+					if (collaborationDoc !== doc) return;
+					workspace = snapshotFromSharedWorkspace(doc, workspace);
+					collaborationFileIds = [...workspace.openFileIds];
+				}, 25);
+			}
+			if (isRemoteUpdateOrigin(origin)) return;
+			collaborationPendingUpdates.push(update.slice());
+			if (collaborationSendTimer) clearTimeout(collaborationSendTimer);
+			collaborationSendTimer = setTimeout(() => {
+				const updates = collaborationPendingUpdates.splice(0);
+				if (!updates.length || collaborationSocket !== socket || !collaborationGroupKey) return;
+				const key = collaborationGroupKey;
+				const payload = mergeUpdates(updates);
+				if (payload.byteLength > MAX_COLLABORATION_BYTES) {
+					collaborationError = 'Die Sitzung ist zu groß für die verschlüsselte Verbindung.';
+					socket.close(4009, 'Sitzungsgröße überschritten');
+					return;
+				}
+				void encryptPayload(
+					key,
+					{ kind: 'yjs-update', update: encodeBase64(payload) },
+					`K+ collaboration v1|${roomId}|${peerId}`
+				).then((encrypted) => {
+					relaySend(socket, { type: 'broadcast', payload: encrypted });
+				});
+			}, 30);
+		};
+		collaborationDoc = doc;
+		collaborationDocListener = listener;
+		doc.on('update', listener);
+		collaborationFileIds = [...workspace.openFileIds];
+	}
+
+	async function handleCollaborationFrame(socket: WebSocket, frame: RelayFrame) {
+		if (socket !== collaborationSocket) return;
+		if (frame.type === 'created' && collaborationRole === 'host') {
+			collaborationPeerId = frame.peerId ?? 'host';
+			collaborationBusy = false;
+			collaborationConnected = true;
+			collaborationFileIds = [...workspace.openFileIds];
+			collaborationPendingHostSnapshot = null;
+			collaborationError = '';
+			announce('Verschlüsselte Sitzung gestartet. Teile den Sechs-Wörter-Code.');
+			return;
+		}
+		if (frame.type === 'joined' && collaborationRole === 'guest') {
+			collaborationPeerId = frame.peerId ?? '';
+			collaborationHostPeerId = frame.hostPeerId ?? 'host';
+			const login = await startOpaqueClientLogin(collaborationJoinCode);
+			collaborationClientState = login.state;
+			relaySend(socket, {
+				type: 'signal',
+				to: collaborationHostPeerId,
+				payload: { type: 'auth-start', request: login.request }
+			});
+			return;
+		}
+		if (frame.type === 'peer-left' && collaborationRole === 'host') {
+			if (frame.peerId) collaborationHostState?.loginStates.delete(frame.peerId);
+			return;
+		}
+		if (frame.type === 'peer-joined' && collaborationRole === 'host') return;
+
+		if (frame.type === 'signal' && frame.from && frame.payload) {
+			const signal = frame.payload;
+			if (collaborationRole === 'host' && collaborationHostState) {
+				if (signal.type === 'auth-start' && typeof signal.request === 'string') {
+					const loginResponse = await createOpaqueServerLogin(
+						collaborationHostState,
+						frame.from,
+						signal.request
+					);
+					relaySend(socket, {
+						type: 'signal',
+						to: frame.from,
+						payload: { type: 'auth-response', loginResponse }
+					});
+					return;
+				}
+				if (
+					signal.type === 'auth-finish' &&
+					typeof signal.request === 'string' &&
+					collaborationGroupBytes &&
+					collaborationGroupKey &&
+					collaborationDoc
+				) {
+					const sessionKey = await finishOpaqueServerLogin(
+						collaborationHostState,
+						frame.from,
+						signal.request
+					);
+					const pairwiseKey = await derivePairwiseKey(sessionKey, collaborationRoomId);
+					const state = fullWorkspaceUpdate(collaborationDoc);
+					if (state.byteLength > MAX_COLLABORATION_BYTES) {
+						throw new Error('Der gemeinsame Workspace überschreitet 20 MB.');
+					}
+					const welcome = await encryptPayload(
+						pairwiseKey,
+						{
+							version: 1,
+							groupKey: encodeBase64(collaborationGroupBytes),
+							state: encodeBase64(state)
+						},
+						`K+ collaboration welcome v1|${collaborationRoomId}|host|${frame.from}`
+					);
+					relaySend(socket, {
+						type: 'signal',
+						to: frame.from,
+						payload: { type: 'welcome', encrypted: welcome }
+					});
+					return;
+				}
+				return;
+			}
+
+			if (collaborationRole === 'guest') {
+				if (
+					signal.type === 'auth-response' &&
+					typeof signal.loginResponse === 'string' &&
+					collaborationClientState
+				) {
+					const login = await finishOpaqueClientLogin(
+						collaborationClientState,
+						signal.loginResponse
+					);
+					collaborationPairwiseKey = await derivePairwiseKey(
+						login.sessionKey,
+						collaborationPendingRoomId
+					);
+					collaborationClientState = null;
+					relaySend(socket, {
+						type: 'signal',
+						to: collaborationHostPeerId,
+						payload: { type: 'auth-finish', request: login.finishLoginRequest }
+					});
+					return;
+				}
+				if (
+					signal.type === 'welcome' &&
+					collaborationPairwiseKey &&
+					signal.encrypted &&
+					typeof signal.encrypted === 'object'
+				) {
+					const welcome = await decryptPayload<{
+						version: number;
+						groupKey: string;
+						state: string;
+					}>(
+						collaborationPairwiseKey,
+						signal.encrypted as unknown as EncryptedPayload,
+						`K+ collaboration welcome v1|${collaborationPendingRoomId}|host|${collaborationPeerId}`
+					);
+					if (welcome.version !== 1) throw new Error('Unbekannte Sitzungs-Version.');
+					const state = decodeBase64(welcome.state);
+					if (state.byteLength > MAX_COLLABORATION_BYTES) {
+						throw new Error('Der gemeinsame Workspace überschreitet 20 MB.');
+					}
+					const doc = new Y.Doc();
+					applyRemoteUpdate(doc, state);
+					workspace = openCollaborationFile(
+						snapshotFromSharedWorkspace(doc, emptyCollaborationWorkspace(workspace.layout))
+					);
+					collaborationRoomId = collaborationPendingRoomId;
+					collaborationGroupKey = await importGroupKey(welcome.groupKey);
+					collaborationGroupBytes = decodeBase64(welcome.groupKey);
+					attachCollaborationDocument(doc, socket, collaborationRoomId, collaborationPeerId);
+					collaborationConnected = true;
+					collaborationFileIds = [...workspace.openFileIds];
+					collaborationBusy = false;
+					collaborationPassphrase = '';
+					relaySend(socket, {
+						type: 'signal',
+						to: collaborationHostPeerId,
+						payload: { type: 'ready' }
+					});
+					collaborationError = '';
+					collaborationOpen = true;
+					announce('Mit der Ende-zu-Ende-verschlüsselten Sitzung verbunden.');
+					return;
+				}
+			}
+			return;
+		}
+
+		if (
+			frame.type === 'broadcast' &&
+			frame.from &&
+			frame.payload &&
+			collaborationGroupKey &&
+			collaborationDoc
+		) {
+			const update = await decryptPayload<{ kind: string; update: string }>(
+				collaborationGroupKey,
+				frame.payload as unknown as EncryptedPayload,
+				`K+ collaboration v1|${collaborationRoomId}|${frame.from}`
+			);
+			if (update.kind !== 'yjs-update' || typeof update.update !== 'string') return;
+			applyRemoteUpdate(collaborationDoc, decodeBase64(update.update));
+		}
+	}
+
+	function endCollaborationSession(closeSocket = true) {
+		const socket = collaborationSocket;
+		const role = collaborationRole;
+		const wasConnected = collaborationConnected;
+		if (role === 'host' && collaborationDoc) {
+			workspace = snapshotFromSharedWorkspace(collaborationDoc, workspace);
+		}
+		if (role === 'host' && !wasConnected && collaborationPendingHostSnapshot) {
+			workspace = collaborationPendingHostSnapshot;
+		}
+		if (collaborationSendTimer) clearTimeout(collaborationSendTimer);
+		if (collaborationStateTimer) clearTimeout(collaborationStateTimer);
+		collaborationSendTimer = undefined;
+		collaborationStateTimer = undefined;
+		if (collaborationDoc && collaborationDocListener) {
+			collaborationDoc.off('update', collaborationDocListener);
+		}
+		if (collaborationDoc) destroySharedWorkspace(collaborationDoc);
+		if (role === 'guest') restoreParkedWorkspace();
+		collaborationSocket = undefined;
+		if (closeSocket && socket && socket.readyState < WebSocket.CLOSING)
+			socket.close(1000, 'Sitzung beendet');
+		collaborationDoc = null;
+		collaborationDocListener = undefined;
+		collaborationHostState = null;
+		collaborationClientState = null;
+		collaborationPairwiseKey = null;
+		collaborationGroupKey = null;
+		collaborationGroupBytes?.fill(0);
+		collaborationGroupBytes = null;
+		collaborationPendingUpdates = [];
+		collaborationPeerId = '';
+		collaborationHostPeerId = '';
+		collaborationPendingHostSnapshot = null;
+		collaborationPendingRoomId = '';
+		collaborationRole = null;
+		collaborationConnected = false;
+		collaborationFileIds = [];
+		collaborationBusy = false;
+		collaborationRoomId = '';
+		collaborationPassphrase = '';
+		collaborationJoinCode = '';
+	}
+
+	async function startHostCollaboration(snapshot: WorkspaceSnapshot) {
+		const code = generateGermanPassphrase();
+		const roomId = await collaborationRoomIdFromCode(code);
+		const hostState = await createOpaqueHost(roomId, code);
+		const doc = new Y.Doc();
+		seedSharedWorkspace(doc, snapshot);
+		const group = await createGroupKey();
+		const socket = await connectCollaborationRelay();
+		collaborationPendingHostSnapshot = snapshot;
+		collaborationSocket = socket;
+		collaborationRole = 'host';
+		collaborationRoomId = roomId;
+		collaborationPassphrase = code;
+		collaborationHostState = hostState;
+		collaborationGroupBytes = group.bytes;
+		collaborationGroupKey = group.key;
+		collaborationBusy = true;
+		collaborationOpen = true;
+		workspace = openCollaborationFile(snapshot);
+		collaborationFileIds = [...workspace.openFileIds];
+		attachCollaborationDocument(doc, socket, roomId, 'host');
+		installCollaborationSocket(socket);
+		relaySend(socket, { type: 'create', roomId });
+	}
+
+	async function startGuestCollaboration(code: string) {
+		const normalizedCode = normalizeCollaborationCode(code);
+		const roomId = await collaborationRoomIdFromCode(normalizedCode);
+		parkLocalWorkspace();
+		const socket = await connectCollaborationRelay();
+		collaborationSocket = socket;
+		collaborationRole = 'guest';
+		collaborationPendingRoomId = roomId;
+		collaborationBusy = true;
+		collaborationOpen = true;
+		collaborationJoinCode = normalizedCode;
+		workspace = emptyCollaborationWorkspace(parkedLocal?.workspace.layout ?? workspace.layout);
+		collaborationFileIds = [];
+		installCollaborationSocket(socket);
+		relaySend(socket, { type: 'join', roomId });
+	}
+
+	async function startCollaboration(action: 'host' | 'guest') {
+		collaborationBusy = true;
+		collaborationError = '';
+		collaborationOpen = action === 'host';
 		const snapshot = $state.snapshot(workspace) as WorkspaceSnapshot;
-		if (saveTimer) clearTimeout(saveTimer);
-		const ticket = ++saveTicket;
-		const savedAt = writeWorkspaceBackup(snapshot);
-		const stored = await enqueueSave(snapshot, ticket, savedAt);
-		const blobUrl = URL.createObjectURL(
-			new Blob([await workspaceExport(snapshot)], { type: 'text/x-python;charset=utf-8' })
-		);
-		const link = document.createElement('a');
-		link.href = blobUrl;
-		link.download = WORKSPACE_ARCHIVE_NAME;
-		link.click();
-		URL.revokeObjectURL(blobUrl);
+		try {
+			if (action === 'host') await startHostCollaboration(snapshot);
+			else await startGuestCollaboration(collaborationJoinCode);
+		} catch (error) {
+			collaborationError =
+				error instanceof Error ? error.message : 'Die Sitzung konnte nicht gestartet werden.';
+			if (collaborationRole) endCollaborationSession();
+			else if (action === 'guest') restoreParkedWorkspace();
+			collaborationPendingHostSnapshot = null;
+			collaborationBusy = false;
+			collaborationOpen = true;
+			if (action === 'host') workspace = snapshot;
+			announce(collaborationError);
+		}
+	}
+
+	function beginCollaboration(action: 'host' | 'guest') {
+		if (collaborationConnected || collaborationBusy || collaborationRole) {
+			collaborationOpen = true;
+			return;
+		}
+		if (action === 'guest') {
+			try {
+				normalizeCollaborationCode(collaborationJoinCode);
+			} catch {
+				collaborationError = 'Der Verbindungscode besteht aus genau sechs Wörtern.';
+				return;
+			}
+		}
+		void startCollaboration(action);
+	}
+
+	async function copyCollaborationCode() {
+		try {
+			await navigator.clipboard.writeText(collaborationPassphrase);
+			announce('Sechs-Wörter-Code kopiert.');
+		} catch {
+			announce('Der Code konnte nicht kopiert werden.');
+		}
+	}
+
+	function leaveCollaboration() {
+		const role = collaborationRole;
+		endCollaborationSession(true);
+		collaborationOpen = false;
 		announce(
-			stored
-				? 'Datenbank heruntergeladen'
-				: 'Python-Datei heruntergeladen. Speichern im Browser ist fehlgeschlagen.'
+			role === 'guest'
+				? 'Sitzung beendet. Deine lokalen Dateien sind wieder geöffnet.'
+				: 'Sitzung beendet.'
 		);
 	}
 
 	async function shareCode() {
+		if (editorEmpty) return;
 		const shareUrl = createShareUrl(editorCode, window.location);
 		if (!canShareCode(editorCode, window.location)) {
 			downloadCode();
@@ -1324,24 +1763,12 @@
 		if (!(event.metaKey || event.ctrlKey)) return;
 		if (event.key.toLowerCase() === 's') {
 			event.preventDefault();
-			if (viewingShare && sharedCode !== null) openSaveShare();
-			else if (webdavCredentials) pushRemoteWorkspace({ announce: true });
-			else downloadCode();
+			if (!editorEmpty) openSave();
 		} else if (event.key === 'Enter') {
 			event.preventDefault();
 			runCode();
 		}
 	}
-
-	$effect(() => {
-		const watching = webdavCredentials && webdavConnection && syncStatus === 'synced';
-		if (!watching) {
-			stopRemoteWatch();
-			return;
-		}
-		startRemoteWatch();
-		return () => stopRemoteWatch();
-	});
 
 	$effect(() => {
 		if (!hydrated || !workspace.welcomed) return;
@@ -1376,7 +1803,7 @@
 		const name = editorName;
 		lintTimer = setTimeout(() => {
 			if (ticket !== lintId) return;
-			void import('$lib/editor/web-lint').then(({ lintWeb }) => {
+			void import('#lib/editor/web-lint.js').then(({ lintWeb }) => {
 				if (ticket !== lintId) return;
 				try {
 					diagnostics = lintWeb(name, source);
@@ -1393,6 +1820,13 @@
 	});
 
 	$effect(() => {
+		const doc = collaborationDoc;
+		if (!hydrated || !doc || !collaborationConnected) return;
+		void collaborationRevision;
+		syncSharedWorkspace(doc, workspace);
+	});
+
+	$effect(() => {
 		if (!hydrated) return;
 		void workspace.files.map((file) => file.content + file.name + file.folderId);
 		void workspace.folders.map((folder) => folder.name + (folder.parentId ?? ''));
@@ -1401,11 +1835,16 @@
 		void workspace.selectedFolderId;
 		void workspace.welcomed;
 		void workspace.layout;
+		void publishedContents;
+		void [...localUnsavedIds];
+		void remotePaths;
+		if (collaborationRole === 'guest') return;
 		const ticket = ++saveTicket;
 		saveTimer = setTimeout(() => {
-			const snapshot = $state.snapshot(workspace) as WorkspaceSnapshot;
-			const savedAt = writeWorkspaceBackup(snapshot);
-			void enqueueSave(snapshot, ticket, savedAt);
+			if (collaborationRole === 'guest') return;
+			const session = captureSession();
+			const savedAt = writeSessionBackup(session);
+			enqueueSessionSave(session, ticket, savedAt);
 		}, SAVE_DELAY_MS);
 		return () => {
 			if (saveTimer) clearTimeout(saveTimer);
@@ -1468,7 +1907,7 @@
 				publish(rendered.source);
 				return;
 			}
-			void import('$lib/editor/document-preview').then(({ renderDocumentPreview }) => {
+			void import('#lib/editor/document-preview.js').then(({ renderDocumentPreview }) => {
 				if (token !== previewToken) return;
 				publish(renderDocumentPreview(rendered.name, rendered.source, dark));
 			});
@@ -1622,12 +2061,15 @@
 		void boot();
 		return () => {
 			cancelled = true;
-			if (remoteSyncTimer) clearTimeout(remoteSyncTimer);
-			stopRemoteWatch();
+			flushEditorSession();
+			collaborationSocket?.close();
+			if (collaborationDoc && collaborationDocListener) {
+				collaborationDoc.off('update', collaborationDocListener);
+			}
+			if (collaborationDoc) destroySharedWorkspace(collaborationDoc);
 			stopWatch();
 			narrowQuery.removeEventListener('change', syncNarrow);
 			window.removeEventListener('message', onPreviewMessage);
-			flushWorkspace();
 			disposePython();
 			ruffWorker?.terminate();
 			if (lintTimer) clearTimeout(lintTimer);
@@ -1635,13 +2077,17 @@
 		};
 
 		async function boot() {
-			const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-			let loaded: { snapshot: WorkspaceSnapshot; created: boolean };
+			persistentCredentialStorage = window.isSecureContext && Boolean(globalThis.crypto?.subtle);
+			if (!persistentCredentialStorage) loginStay = false;
+			let loaded: { session: EditorSession; created: boolean };
 			try {
-				loaded = await loadWorkspace(legacy);
+				loaded = await loadSession();
 			} catch {
-				loaded = { snapshot: createInitialWorkspace(legacy), created: false };
-				announce('Die gespeicherte Workspace konnte nicht gelesen werden.');
+				loaded = {
+					session: sessionFromWorkspace(createInitialWorkspace()),
+					created: true
+				};
+				announce('Der gespeicherte Editorstand konnte nicht gelesen werden.');
 			}
 			if (cancelled) return;
 			const url = new URL(window.location.href);
@@ -1654,9 +2100,7 @@
 			} else if (hasImport) {
 				announce('Der geteilte Code ist ungültig oder zu groß.');
 			}
-			if (loaded.created && legacy) localStorage.removeItem(LEGACY_STORAGE_KEY);
-			markSaved(loaded.snapshot);
-			workspace = loaded.snapshot;
+			applySession(loaded.session);
 			hydrated = true;
 			if (readLocalOnly()) return;
 			void loadWebDavCredentials()
@@ -1688,19 +2132,11 @@
 	<title>K+ Coder</title>
 	<meta
 		name="description"
-		content="Python, HTML, CSS und JavaScript im Browser bearbeiten – lokal oder synchronisiert mit wwschool."
+		content="Python, HTML, CSS und JavaScript im Browser bearbeiten – allein, in wwschool speichern oder verschlüsselt gemeinsam arbeiten."
 	/>
 </svelte:head>
 
-<svelte:window
-	onkeydown={handleShortcut}
-	onbeforeunload={handleBeforeUnload}
-	onpagehide={() => {
-		flushWorkspace();
-		pushRemoteWorkspace();
-	}}
-	onvisibilitychange={handleVisibility}
-/>
+<svelte:window onkeydown={handleShortcut} onpagehide={() => flushEditorSession()} />
 
 {#if !hydrated}
 	<div class="boot">Wird geladen …</div>
@@ -1713,11 +2149,11 @@
 				class="files-button"
 				onclick={openExplorer}
 				aria-label="Dateien"
-				title={dirty || sharedCode !== null ? 'Ungespeicherte Änderungen' : 'Dateien'}
+				title={dirty ? 'Ungespeicherte Änderungen' : 'Dateien'}
 			>
 				<Files />
 				<span class="action-label">Dateien</span>
-				{#if dirty || sharedCode !== null}<i class="dirty-mark" aria-hidden="true"></i>{/if}
+				{#if dirty}<i class="dirty-mark" aria-hidden="true"></i>{/if}
 			</Button>
 			<div class="toolbar">
 				<ButtonGroup.Root aria-label="Ausführen und Datei">
@@ -1726,7 +2162,8 @@
 						size={narrow ? 'icon-sm' : 'sm'}
 						class={pythonLoading ? 'run-busy' : undefined}
 						onclick={runCode}
-						disabled={!showsPreview && !isJavaScript && (!isPython || pythonLoading)}
+						disabled={editorEmpty ||
+							(!showsPreview && !isJavaScript && (!isPython || pythonLoading))}
 						aria-busy={pythonLoading}
 						aria-label={showsPreview
 							? 'Vorschau neu laden'
@@ -1753,8 +2190,17 @@
 						variant="outline"
 						size={narrow ? 'icon-sm' : 'sm'}
 						onclick={shareCode}
+						disabled={editorEmpty}
 						aria-label="Teilen"
 						title="Teilen"><Share2 /><span class="action-label">Teilen</span></Button
+					>
+					<Button
+						variant="outline"
+						size={narrow ? 'icon-sm' : 'sm'}
+						onclick={() => (collaborationOpen = true)}
+						aria-label="Live-Zusammenarbeit öffnen"
+						title="Live-Zusammenarbeit starten"
+						><UsersRound /><span class="action-label">Zusammenarbeit</span></Button
 					>
 					<Button
 						variant="outline"
@@ -1763,31 +2209,24 @@
 						aria-label="Doku"
 						title="Doku"><Book /><span class="action-label">Doku</span></Button
 					>
-					{#if sharedCode !== null}
-						<Button
-							variant="outline"
-							size={narrow ? 'icon-sm' : 'sm'}
-							onclick={openSaveShare}
-							aria-label="Geteilte Datei speichern"
-							title="Geteilte Datei ist nicht gespeichert. Ordner in Dateien wählen."
-							><Save /><span class="action-label">Speichern</span></Button
-						>
-					{:else if webdavCredentials}
-						<Button
-							variant="outline"
-							size={narrow ? 'icon-sm' : 'sm'}
-							onclick={() => pushRemoteWorkspace({ announce: true })}
-							aria-label="Mit wwschool speichern"
-							title="Mit wwschool speichern (Cmd/Strg+S)"
-							><Save /><span class="action-label">Speichern</span></Button
-						>
-					{/if}
+					<Button
+						variant="outline"
+						size={narrow ? 'icon-sm' : 'sm'}
+						onclick={openSave}
+						disabled={editorEmpty || syncStatus === 'connecting' || wwschoolSaveBusy}
+						aria-label="Speichern"
+						title={webdavCredentials && webdavConnection
+							? 'Geöffnete Datei nach wwschool legen (Cmd/Strg+S)'
+							: 'Bei wwschool anmelden und speichern (Cmd/Strg+S)'}
+						><Save /><span class="action-label">Speichern</span></Button
+					>
 					<Button
 						variant="outline"
 						size="icon-sm"
 						onclick={downloadCode}
+						disabled={editorEmpty}
 						aria-label="{editorName} herunterladen"
-						title="Herunterladen (Cmd/Strg+S)"><Download /></Button
+						title="Herunterladen"><Download /></Button
 					>
 				</ButtonGroup.Root>
 				<Popover.Root bind:open={settingsOpen}>
@@ -1810,8 +2249,9 @@
 									{webdavCredentials.username}
 								</p>
 								<p class="settings-note">
-									wwschool legt jeden Upload als neue Datei an. Gespeichert wird mit Speichern
-									(Cmd/Strg+S) oder wenn der Tab in den Hintergrund geht.
+									Speichern legt die geöffnete Datei in {CODER_FOLDER_NAME} in deiner Dateiablage ab.
+									wwschool erzeugt dabei immer eine neue Datei; gleicher Name wird eine weitere Kopie.
+									Löschen geht nur in der wwschool-App oder im Web.
 								</p>
 								{#if !webdavRemembered}
 									<p class="settings-note">Nur diese Sitzung</p>
@@ -1956,26 +2396,127 @@
 	<FilesExplorer
 		bind:open={filesOpen}
 		openedToken={explorerToken}
-		snapshot={workspace}
-		onchange={applyWorkspace}
-		ondownload={downloadDatabase}
+		snapshot={webdavConnection ? remoteExplorerSnapshot() : workspace}
+		onchange={applyExplorer}
 		onnotice={announce}
 		onrestore={restoredWorkspace}
 		syncStatus={syncStatus === 'connecting' ? 'syncing' : syncStatus}
 		syncLocation={webdavConnection?.personalName ?? ''}
-		onresolve={syncConflict ? openSyncConflict : undefined}
-		onsave={saveChooser ? saveShared : undefined}
+		remote={Boolean(webdavConnection)}
+		onopenfile={(href) => void openRemoteFile(href)}
+		onremotefolder={(parent, name) => createRemoteFolder(parent, name)}
+		onremotefile={(folder, name) => createRemoteFile(folder, name)}
+		onimportfiles={importWorkspaceFiles}
 	/>
+	{#if webdavConnection}
+		<SaveAsDialog
+			bind:open={saveAsOpen}
+			openedToken={saveAsToken}
+			initialName={editorName}
+			folders={saveTree.folders}
+			files={saveTree.files}
+			rootId={saveTree.folders[0]?.id ?? webdavConnection.projectHref}
+			busy={wwschoolSaveBusy}
+			onsave={(folderId, filename) => void commitSaveAs(folderId, filename)}
+		/>
+	{/if}
+	<Dialog.Root bind:open={collaborationOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Zusammenarbeit</Dialog.Title>
+				<Dialog.Description>
+					Dateinamen, Ordner, Tabs und Code werden Ende-zu-Ende-verschlüsselt geteilt. Beim
+					Verbinden öffnet sich ein eigener Tab nur für die Sitzung; dein lokaler Editorstand bleibt
+					getrennt. Der VPS sieht Verbindungsmetadaten wie Teilnehmende und Datenmenge; aktiver Tab,
+					Cursor und Scrollposition bleiben lokal.
+				</Dialog.Description>
+			</Dialog.Header>
+			{#if collaborationConnected}
+				{#if collaborationRole === 'host'}
+					<div class="grid gap-3 rounded-lg border p-3">
+						<div class="grid gap-1">
+							<Label for="collaboration-passphrase">Sechs-Wörter-Code</Label>
+							<input
+								id="collaboration-passphrase"
+								readonly
+								value={collaborationPassphrase}
+								class="h-9 rounded-md border bg-muted px-2.5 font-mono text-sm"
+							/>
+						</div>
+						<Button type="button" variant="outline" onclick={() => void copyCollaborationCode()}
+							>Code kopieren</Button
+						>
+					</div>
+				{:else}
+					<p class="rounded-lg border p-3 text-sm">Mit der Sitzung verbunden.</p>
+				{/if}
+				<p class="text-xs text-muted-foreground">
+					Teile den Code nur mit Teilnehmenden. Der Relay sieht die Sitzungskennung und
+					Verbindungsmetadaten, aber keinen Workspace-Klartext.
+				</p>
+				<Button type="button" variant="destructive" onclick={leaveCollaboration}
+					>Zusammenarbeit beenden</Button
+				>
+			{:else if collaborationBusy}
+				<p class="text-sm" aria-live="polite">Verbindung wird aufgebaut …</p>
+				{#if collaborationError}<p class="text-sm text-destructive" role="alert">
+						{collaborationError}
+					</p>{/if}
+			{:else}
+				{#if collaborationError}<p class="text-sm text-destructive" role="alert">
+						{collaborationError}
+					</p>{/if}
+				<Button type="button" onclick={() => beginCollaboration('host')}>Sitzung starten</Button>
+				<div class="grid gap-2 border-t pt-3">
+					<Label for="collaboration-code-input">Sechs-Wörter-Code</Label>
+					<input
+						id="collaboration-code-input"
+						bind:value={collaborationJoinCode}
+						class="h-9 rounded-md border bg-transparent px-2.5 font-mono text-sm"
+						autocomplete="off"
+						placeholder="Wort1 Wort2 Wort3 Wort4 Wort5 Wort6"
+					/>
+					<Button type="button" variant="outline" onclick={() => beginCollaboration('guest')}
+						>Verbinden</Button
+					>
+				</div>
+			{/if}
+		</Dialog.Content>
+	</Dialog.Root>
+	<AlertDialog.Root
+		open={pendingCloseTabId !== null || pendingCloseShare}
+		onOpenChange={(open) => {
+			if (!open) {
+				pendingCloseTabId = null;
+				pendingCloseShare = false;
+			}
+		}}
+	>
+		<AlertDialog.Content>
+			<AlertDialog.Header>
+				<AlertDialog.Title>Ungespeicherte Datei schließen?</AlertDialog.Title>
+				<AlertDialog.Description>
+					{pendingCloseShare
+						? 'geteilt.py ist noch nicht gespeichert. Beim Schließen wird dieser Tab entfernt.'
+						: `„${workspace.files.find((file) => file.id === pendingCloseTabId)?.name ?? 'Diese Datei'}“ ist noch nicht nach wwschool gelegt oder heruntergeladen. Der Tab wird geschlossen; die Datei bleibt im Projekt.`}
+				</AlertDialog.Description>
+			</AlertDialog.Header>
+			<AlertDialog.Footer>
+				<AlertDialog.Cancel>Abbrechen</AlertDialog.Cancel>
+				<AlertDialog.Action variant="destructive" onclick={confirmClosePendingTab}
+					>Schließen</AlertDialog.Action
+				>
+			</AlertDialog.Footer>
+		</AlertDialog.Content>
+	</AlertDialog.Root>
 	<Dialog.Root
 		bind:open={loginOpen}
 		onOpenChange={(open) => {
 			if (!open) {
 				loginPassword = '';
 				loginError = '';
-				if (!filesOpen) {
-					filesAfterLogin = false;
-					saveChooser = false;
-				}
+				filesAfterLogin = false;
+				saveAfterLogin = false;
 			}
 		}}
 	>
@@ -1983,7 +2524,8 @@
 			<Dialog.Header>
 				<Dialog.Title>Bei wwschool anmelden</Dialog.Title>
 				<Dialog.Description>
-					Dein Workspace bleibt lokal gespeichert und wird mit wwschool abgeglichen.
+					Deine Dateien bleiben in diesem Browser. Speichern legt sie im Ordner {CODER_FOLDER_NAME}
+					in deiner Dateiablage ab.
 				</Dialog.Description>
 			</Dialog.Header>
 			<form class="grid gap-4" onsubmit={submitWebDavLogin}>
@@ -2011,11 +2553,18 @@
 					/>
 				</div>
 				<label class="stay-logged" for="wwschool-stay">
-					<input id="wwschool-stay" type="checkbox" bind:checked={loginStay} disabled={loginBusy} />
+					<input
+						id="wwschool-stay"
+						type="checkbox"
+						bind:checked={loginStay}
+						disabled={loginBusy || !persistentCredentialStorage}
+					/>
 					<span>Angemeldet bleiben</span>
 				</label>
 				<p class="text-xs text-muted-foreground">
-					Ohne Haken gilt die Anmeldung nur für diese Sitzung.
+					{persistentCredentialStorage
+						? 'Ohne Haken gilt die Anmeldung nur für diese Sitzung.'
+						: 'Über die IP-Adresse gilt die Anmeldung nur für diesen Tab.'}
 				</p>
 				{#if loginError}
 					<p class="text-sm text-destructive" role="alert">{loginError}</p>
@@ -2025,77 +2574,19 @@
 						{#if loginBusy}<LoaderCircle class="animate-spin" />{/if}
 						{loginBusy ? 'Anmelden …' : 'Anmelden'}
 					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="xs"
-						disabled={loginBusy}
-						onclick={continueLocally}
-					>
-						Lokal weiterarbeiten
-					</Button>
+					{#if !saveAfterLogin}
+						<Button
+							type="button"
+							variant="ghost"
+							size="xs"
+							disabled={loginBusy}
+							onclick={continueLocally}
+						>
+							Lokal weiterarbeiten
+						</Button>
+					{/if}
 				</div>
 			</form>
-		</Dialog.Content>
-	</Dialog.Root>
-	<Dialog.Root bind:open={conflictOpen}>
-		<Dialog.Content class="sm:max-w-xl">
-			<Dialog.Header>
-				<Dialog.Title>Abweichende Stände</Dialog.Title>
-				<Dialog.Description>{syncConflict?.message}</Dialog.Description>
-			</Dialog.Header>
-			{#if syncConflict}
-				<div class="grid gap-3 text-sm">
-					<div class="grid grid-cols-2 gap-3 rounded-md border p-3">
-						<div class="grid gap-1">
-							<p class="text-muted-foreground">Lokal</p>
-							<p class="flex gap-1 font-medium">
-								<span>{syncConflict.local.files.length}</span><span>&nbsp;Dateien</span>
-							</p>
-						</div>
-						<div class="grid gap-1">
-							<p class="text-muted-foreground">wwschool</p>
-							<p class="flex gap-1 font-medium">
-								{#if syncConflict.remote}
-									<span>{syncConflict.remote.snapshot.files.length}</span><span>&nbsp;Dateien</span>
-								{:else}
-									<span>Datei fehlt</span>
-								{/if}
-							</p>
-						</div>
-					</div>
-					<p>Beide Stände bleiben unverändert, bis du eine Seite übernimmst.</p>
-				</div>
-			{/if}
-			<Dialog.Footer class="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-				<Button
-					type="button"
-					variant="outline"
-					class="w-full whitespace-normal sm:col-span-2"
-					onclick={() => (conflictOpen = false)}
-				>
-					Später
-				</Button>
-				{#if syncConflict?.remote}
-					<Button
-						type="button"
-						variant="outline"
-						class="w-full min-w-0 whitespace-normal"
-						onclick={() => void useRemoteVersion()}
-					>
-						wwschool laden
-					</Button>
-				{/if}
-				<Button
-					type="button"
-					class={syncConflict?.remote
-						? 'w-full min-w-0 whitespace-normal'
-						: 'w-full min-w-0 whitespace-normal sm:col-span-2'}
-					onclick={() => void useLocalVersion()}
-				>
-					Lokal übernehmen
-				</Button>
-			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
 	<NewFileDialog bind:open={createOpen} oncreate={createNamedFile} />
@@ -2126,7 +2617,7 @@
 				<X />
 			</button>
 			{#if docsOpen}
-				{#await import('$lib/docs/docs-browser.svelte') then { default: DocsBrowser }}
+				{#await import('#lib/docs/docs-browser.svelte') then { default: DocsBrowser }}
 					<DocsBrowser fill language={docsLanguage} focusId={docsFocusId} />
 				{/await}
 			{/if}
@@ -2178,18 +2669,20 @@
 							role="tab"
 							class="tab-name"
 							aria-selected={pane === 'code' && viewingShare}
-							title="Geteilte Datei ist nicht gespeichert"
+							title={shareDirty ? 'Geteilte Datei ist nicht gespeichert' : 'Geteilte Datei'}
 							onclick={showShare}
 						>
 							geteilt.py
-							<i class="dirty-mark" aria-hidden="true"></i>
-							<em>Nicht gespeichert</em>
+							{#if shareDirty}
+								<i class="dirty-mark" aria-hidden="true"></i>
+								<em>Nicht gespeichert</em>
+							{/if}
 						</button>
 						<button
 							type="button"
 							class="tab-close"
 							aria-label="Geteilte Datei schließen"
-							onclick={discardShare}
+							onclick={requestCloseShare}
 						>
 							<X />
 						</button>
@@ -2208,21 +2701,25 @@
 							onclick={() => showFile(file.id)}
 						>
 							{file.name}
-							{#if dirtyFileIds.has(file.id)}
-								<i class="dirty-mark" aria-hidden="true"></i>
-								<span class="sr-only">Ungespeichert</span>
+							{#if dirtyFileIds.has(file.id) || collaborationFileIds.includes(file.id)}
+								<i
+									class="dirty-mark"
+									class:collaboration-mark={collaborationFileIds.includes(file.id)}
+									aria-hidden="true"
+								></i>
+								{#if dirtyFileIds.has(file.id)}
+									<span class="sr-only">Ungespeichert</span>
+								{/if}
 							{/if}
 						</button>
-						{#if openFiles.length > 1}
-							<button
-								type="button"
-								class="tab-close"
-								aria-label="{file.name} schließen"
-								onclick={() => closeTab(file.id)}
-							>
-								<X />
-							</button>
-						{/if}
+						<button
+							type="button"
+							class="tab-close"
+							aria-label="{file.name} schließen"
+							onclick={() => requestCloseTab(file.id)}
+						>
+							<X />
+						</button>
 					</div>
 				{/each}
 				<button
@@ -2240,7 +2737,7 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={undo}
-					disabled={!canUndo}
+					disabled={!canUndo || editorEmpty}
 					aria-label="Rückgängig"
 					title="Rückgängig"><Undo2 /></Button
 				>
@@ -2248,7 +2745,7 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={redo}
-					disabled={!canRedo}
+					disabled={!canRedo || editorEmpty}
 					aria-label="Wiederholen"
 					title="Wiederholen"><Redo2 /></Button
 				>
@@ -2256,28 +2753,47 @@
 					variant="ghost"
 					size="icon-sm"
 					onclick={() => (clearOpen = true)}
+					disabled={editorEmpty}
 					aria-label="Code löschen"
 					title="Code löschen"><Trash2 /></Button
 				>
 			</ButtonGroup.Root>
 		</div>
 		<div class="tab-content" hidden={pane !== 'code'}>
-			<CodeEditor
-				bind:this={codeEditor}
-				fileId={editorFileId}
-				value={editorCode}
-				language={codeLanguage(editorName)}
-				{diagnostics}
-				{theme}
-				wrapLines={narrow}
-				visible={pane === 'code'}
-				onchange={editActiveFile}
-				onopendocs={openDocs}
-				onhistory={(state) => {
-					canUndo = state.canUndo;
-					canRedo = state.canRedo;
-				}}
-			/>
+			{#if editorEmpty}
+				<div class="problems-empty" role="status">
+					{#if collaborationRole === 'guest' && !collaborationConnected}
+						<p>Keine Datei geöffnet</p>
+						<p class="muted">Die gemeinsame Sitzung wird verbunden …</p>
+					{:else}
+						<p>Keine Datei geöffnet</p>
+						<p class="muted">
+							{collaborationRole
+								? 'Erstelle eine Datei, um in der Sitzung weiterzuarbeiten.'
+								: 'Erstelle eine Datei, um im Editor weiterzuschreiben.'}
+						</p>
+						<Button type="button" onclick={() => (createOpen = true)}>Datei erstellen</Button>
+					{/if}
+				</div>
+			{:else}
+				<CodeEditor
+					bind:this={codeEditor}
+					fileId={editorFileId}
+					value={editorCode}
+					language={codeLanguage(editorName)}
+					{diagnostics}
+					{theme}
+					wrapLines={narrow}
+					visible={pane === 'code'}
+					sharedText={editorSharedText}
+					onchange={editActiveFile}
+					onopendocs={openDocs}
+					onhistory={(state) => {
+						canUndo = state.canUndo;
+						canRedo = state.canRedo;
+					}}
+				/>
+			{/if}
 		</div>
 		{#if pane === 'problems'}
 			<div class="problems-content">
@@ -2351,6 +2867,7 @@
 								class="console-dismiss"
 								aria-label="Ausgabe entfernen"
 								title="Ausgabe entfernen"
+								disabled={pendingPythonInput !== null && pendingPythonInput === block.runId}
 								onclick={() => dismissConsole(block.id)}><X /></button
 							>
 						</div>
@@ -2385,6 +2902,19 @@
 								<span>{block.status}</span>
 								{#if block.finishedAt}<time>{block.finishedAt}</time>{/if}
 							</p>
+						{/if}
+						{#if pendingPythonInput !== null && pendingPythonInput === block.runId}
+							<form class="console-input" onsubmit={submitConsoleInput}>
+								<label for="python-console-input">Eingabe für Python</label>
+								<input
+									id="python-console-input"
+									bind:this={pythonInputElement}
+									bind:value={pythonInputValue}
+									autocomplete="off"
+									spellcheck="false"
+								/>
+								<button type="submit">Senden</button>
+							</form>
 						{/if}
 					</li>
 				{/each}
@@ -2586,6 +3116,9 @@
 		border-radius: 50%;
 		background: oklch(0.72 0.16 70);
 	}
+	.collaboration-mark {
+		background: oklch(0.62 0.19 250);
+	}
 	.workspace {
 		display: flex;
 		min-width: 0;
@@ -2723,6 +3256,9 @@
 	.problems-empty .muted {
 		font-weight: 400;
 		color: var(--muted-foreground);
+	}
+	.problems-empty :global(button) {
+		margin-top: 0.55rem;
 	}
 	.problems-list {
 		min-height: 0;
@@ -2944,6 +3480,37 @@
 	.console-title,
 	.console-status {
 		margin: 0;
+	}
+	.console-input {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 0.45rem;
+		padding: 0.65rem 0.75rem;
+		border-top: 1px solid var(--border);
+		background: color-mix(in oklch, var(--muted) 35%, var(--background));
+	}
+	.console-input label {
+		grid-column: 1 / -1;
+		color: var(--muted-foreground);
+		font: 550 0.72rem/1.3 var(--font-sans);
+	}
+	.console-input input {
+		min-width: 0;
+		padding: 0.45rem 0.55rem;
+		border: 1px solid var(--border);
+		border-radius: 0;
+		background: var(--background);
+		color: var(--foreground);
+		font: 400 0.82rem/1.4 var(--font-code);
+	}
+	.console-input button {
+		padding: 0.4rem 0.7rem;
+		border: 1px solid var(--foreground);
+		border-radius: 0;
+		background: var(--foreground);
+		color: var(--background);
+		font: 550 0.74rem/1.4 var(--font-sans);
+		cursor: pointer;
 	}
 	.console-title {
 		display: flex;

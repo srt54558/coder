@@ -1,9 +1,9 @@
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
-import { lessonForToken } from '$lib/docs/lookup';
-import type { Lesson } from '$lib/docs/lessons';
-import type { CodeLanguage } from '$lib/workspace/model';
+import { lessonForToken } from '#lib/docs/lookup.js';
+import type { Lesson } from '#lib/docs/lessons.js';
+import type { CodeLanguage } from '#lib/workspace/model.js';
 
 export type DocsHit = {
 	from: number;
@@ -60,7 +60,7 @@ function tokenAt(
 	pos: number,
 	side: -1 | 1
 ): { from: number; to: number; text: string } | null {
-	let node = syntaxTree(state).resolveInner(pos, side);
+	const node = syntaxTree(state).resolveInner(pos, side);
 	for (let cursor: SyntaxNode | null = node; cursor; cursor = cursor.parent) {
 		if (SKIP.has(cursor.name)) return null;
 	}

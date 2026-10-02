@@ -7,7 +7,7 @@ import {
 import { globalCompletion, localCompletionSource } from '@codemirror/lang-python';
 import { hoverTooltip, type EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import type { CodeLanguage } from '$lib/workspace/model';
+import type { CodeLanguage } from '#lib/workspace/model.js';
 import { docsHitAt } from './docs-hover';
 import { symbolAt, definitionOf, type PythonSymbol, type SymbolKind } from './symbols';
 
