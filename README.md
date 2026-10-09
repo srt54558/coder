@@ -12,7 +12,7 @@ Die Seite ist eine statische Website. Cloudflare liefert nur Dateien aus und fü
 - Dateien und Ordner anlegen; offene Tabs, Inhalte und der Ungespeichert-Stand bleiben im Browser erhalten, sind aber kein Ersatz für wwschool
 - optional mit demselben wwschool-Zugang Dateien in `coder-kplus` in der persönlichen Dateiablage ablegen; der Explorer zeigt diesen Ordner, Speichern öffnet einen Speichern-unter-Dialog
 - den gesamten Workspace als `coder-workspace.py` herunterladen; der Import ersetzt den geöffneten Workspace nach einer Rückfrage
-- live gemeinsam arbeiten: Sechs-Wörter-Code, bis zu 16 Teilnehmende, Ende-zu-Ende-verschlüsselte Dateinamen, Ordner, Tabs und Inhalte; Beitreten öffnet einen eigenen Tab nur für die Sitzung, der lokale Editorstand bleibt getrennt
+- live gemeinsam arbeiten: Vier-Wörter-Code, bis zu 16 Teilnehmende, Ende-zu-Ende-verschlüsselte Dateinamen, Ordner, Tabs und Inhalte; Beitreten öffnet einen eigenen Tab nur für die Sitzung, der lokale Editorstand bleibt getrennt
 - einen Dateiinhalt als Link teilen; ein geöffneter geteilter Stand bleibt ungespeichert, bis du speicherst oder die Datei herunterlädst
 - beim Schließen eines ungespeicherten Editor-Tabs nachfragen; das Schließen des Browser-Tabs warnt nicht, weil der Editorstand lokal liegt
 
@@ -30,7 +30,7 @@ Die Python-Laufzeit (Pyodide 314.0.7, inklusive Standardbibliothek) liegt unter 
 
 wwschool erzeugt bei jedem Upload eine neue Datei. Gleicher Name wird eine weitere Kopie. Löschen geht nur in der wwschool-App oder im Web.
 
-Die Zusammenarbeit nutzt einen WebSocket-Relay auf `server`. Die Sitzungskennung wird als SHA-256-Hash aus dem Sechs-Wörter-Code abgeleitet; OPAQUE schützt die Anmeldung. Workspace-Daten werden im Browser mit AES-GCM verschlüsselt, bevor sie den Relay erreichen. Er hält aktive Sitzungen nur im Arbeitsspeicher. Er sieht Sitzungs- und Verbindungsmetadaten wie Teilnehmende und Datenmenge, aber weder den Code im Klartext noch Workspace-Klartext. Jede teilnehmende Person mit dem Code kann den Workspace lesen und bearbeiten.
+Die Zusammenarbeit nutzt einen WebSocket-Relay auf `server`. Die Sitzungskennung wird als SHA-256-Hash aus dem Vier-Wörter-Code abgeleitet; OPAQUE schützt die Anmeldung. Workspace-Daten werden im Browser mit AES-GCM verschlüsselt, bevor sie den Relay erreichen. Er hält aktive Sitzungen nur im Arbeitsspeicher. Er sieht Sitzungs- und Verbindungsmetadaten wie Teilnehmende und Datenmenge, aber weder den Code im Klartext noch Workspace-Klartext. Jede teilnehmende Person mit dem Code kann den Workspace lesen und bearbeiten.
 
 Im Browser fehlen normale Prozesse und native Threads. Ein Lauf endet nach 15 Sekunden oder beim Stopp; der Python-Worker wird danach neu aufgebaut.
 

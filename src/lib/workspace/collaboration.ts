@@ -11,7 +11,7 @@ export const COLLABORATION_RELAY_URL = 'wss://ac.k-plus.one/__collab';
 export const MAX_COLLABORATION_BYTES = 20_000_000;
 const WORKSPACE_ORIGIN = 'workspace-ui';
 const REMOTE_ORIGIN = 'collaboration-relay';
-const COLLABORATION_CODE_WORDS = 6;
+const COLLABORATION_CODE_WORDS = 4;
 
 const DICEWARE_WORDS = dicewareText
 	.split(/\r?\n/u)
@@ -57,7 +57,7 @@ export function normalizePassphrase(value: string): string {
 export function normalizeCollaborationCode(code: string): string {
 	const normalized = normalizePassphrase(code);
 	if (normalized.split(' ').length !== COLLABORATION_CODE_WORDS) {
-		throw new Error('Der Verbindungscode besteht aus genau sechs Wörtern.');
+		throw new Error('Der Verbindungscode besteht aus genau vier Wörtern.');
 	}
 	return normalized;
 }
@@ -136,7 +136,7 @@ export async function finishOpaqueClientLogin(
 		loginResponse,
 		password: state.password
 	});
-	if (!result) throw new Error('Der Sechs-Wörter-Code stimmt nicht.');
+	if (!result) throw new Error('Der Vier-Wörter-Code stimmt nicht.');
 	return { finishLoginRequest: result.finishLoginRequest, sessionKey: result.sessionKey };
 }
 

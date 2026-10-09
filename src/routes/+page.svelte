@@ -1436,7 +1436,7 @@
 			collaborationFileIds = [...workspace.openFileIds];
 			collaborationPendingHostSnapshot = null;
 			collaborationError = '';
-			announce('Verschlüsselte Sitzung gestartet. Teile den Sechs-Wörter-Code.');
+			announce('Verschlüsselte Sitzung gestartet. Teile den Vier-Wörter-Code.');
 			return;
 		}
 		if (frame.type === 'joined' && collaborationRole === 'guest') {
@@ -1711,7 +1711,7 @@
 			try {
 				normalizeCollaborationCode(collaborationJoinCode);
 			} catch {
-				collaborationError = 'Der Verbindungscode besteht aus genau sechs Wörtern.';
+				collaborationError = 'Der Verbindungscode besteht aus genau vier Wörtern.';
 				return;
 			}
 		}
@@ -1721,7 +1721,7 @@
 	async function copyCollaborationCode() {
 		try {
 			await navigator.clipboard.writeText(collaborationPassphrase);
-			announce('Sechs-Wörter-Code kopiert.');
+			announce('Vier-Wörter-Code kopiert.');
 		} catch {
 			announce('Der Code konnte nicht kopiert werden.');
 		}
@@ -2449,13 +2449,14 @@
 				{#if collaborationRole === 'host'}
 					<div class="grid gap-3 rounded-lg border p-3">
 						<div class="grid gap-1">
-							<Label for="collaboration-passphrase">Sechs-Wörter-Code</Label>
-							<input
+							<Label for="collaboration-passphrase">Vier-Wörter-Code</Label>
+							<textarea
 								id="collaboration-passphrase"
 								readonly
-								value={collaborationPassphrase}
-								class="h-9 rounded-md border bg-muted px-2.5 font-mono text-sm"
-							/>
+								rows="2"
+								class="min-h-16 w-full resize-none overflow-y-auto rounded-md border bg-muted px-2.5 py-2 font-mono text-sm leading-6"
+								>{collaborationPassphrase}</textarea
+							>
 						</div>
 						<Button type="button" variant="outline" onclick={() => void copyCollaborationCode()}
 							>Code kopieren</Button
@@ -2482,14 +2483,14 @@
 					</p>{/if}
 				<Button type="button" onclick={() => beginCollaboration('host')}>Sitzung starten</Button>
 				<div class="grid gap-2 border-t pt-3">
-					<Label for="collaboration-code-input">Sechs-Wörter-Code</Label>
-					<input
+					<Label for="collaboration-code-input">Vier-Wörter-Code</Label>
+					<textarea
 						id="collaboration-code-input"
 						bind:value={collaborationJoinCode}
-						class="h-9 rounded-md border bg-transparent px-2.5 font-mono text-sm"
+						rows="2"
+						class="min-h-16 w-full resize-y overflow-y-auto rounded-md border bg-transparent px-2.5 py-2 font-mono text-sm leading-6"
 						autocomplete="off"
-						placeholder="Wort1 Wort2 Wort3 Wort4 Wort5 Wort6"
-					/>
+						placeholder="Wort1 Wort2 Wort3 Wort4"></textarea>
 					<Button type="button" variant="outline" onclick={() => beginCollaboration('guest')}
 						>Verbinden</Button
 					>
