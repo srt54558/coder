@@ -3,7 +3,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import { programBlocks } from '#lib/runner/program-visualizer.js';
 
-	let { code }: { code: string } = $props();
+	let { code, outputs = {} }: { code: string; outputs?: Record<number, string> } = $props();
 	let zoom = $state(1);
 	const blocks = $derived(programBlocks(code));
 
@@ -17,17 +17,22 @@
 		{#if blocks.length}
 			<div class="flow" style:zoom>
 				{#each blocks as block, index (block.line)}
+					{@const output = outputs[block.line]}
 					<div class="flow-row" style={`--indent: ${block.indent * 5}px`}>
 						{#if index > 0}<span class="flow-arrow" aria-hidden="true">↓</span>{/if}
 						<div
 							class="flow-block"
 							class:condition={block.kind === 'condition'}
 							class:loop={block.kind === 'loop'}
+							class:emitted={output !== undefined}
 						>
 							<div class="flow-label">
 								<span>{block.label}</span><span>Zeile {block.line}</span>
 							</div>
 							<code>{block.source}</code>
+							{#if output !== undefined}
+								<pre class="flow-output" aria-live="polite">{output}</pre>
+							{/if}
 						</div>
 					</div>
 				{/each}
@@ -120,6 +125,13 @@
 		border-left-color: oklch(64% 0.13 185);
 	}
 
+	.flow-block.emitted {
+		border-color: color-mix(in oklch, var(--primary) 58%, var(--border));
+		border-left-color: var(--primary);
+		background: color-mix(in oklch, var(--primary) 9%, var(--background));
+		box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 13%, transparent);
+	}
+
 	.flow-label {
 		display: flex;
 		justify-content: space-between;
@@ -133,6 +145,15 @@
 	.flow-block code {
 		color: var(--foreground);
 		font: 500 0.82rem/1.55 var(--font-code);
+		white-space: pre-wrap;
+	}
+
+	.flow-output {
+		margin: 0.55rem 0 0;
+		border-top: 1px solid color-mix(in oklch, var(--primary) 25%, var(--border));
+		padding-top: 0.45rem;
+		color: var(--primary);
+		font: 500 0.8rem/1.5 var(--font-code);
 		white-space: pre-wrap;
 	}
 

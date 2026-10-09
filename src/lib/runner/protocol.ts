@@ -5,7 +5,7 @@ export const PYTHON_INPUT_HEADER_BYTES = Int32Array.BYTES_PER_ELEMENT * 2;
 
 export type PythonWorkerMessage =
 	| { type: 'status'; status: RunnerStatus; version?: string }
-	| { type: 'output'; id: number; stream: 'stdout' | 'stderr'; text: string }
+	| { type: 'output'; id: number; stream: 'stdout' | 'stderr'; text: string; line?: number }
 	| { type: 'input'; id: number; buffer: SharedArrayBuffer }
 	| { type: 'result'; id: number; stdout: string; stderr: string; durationMs: number }
 	| { type: 'error'; id: number; error: string; durationMs: number }

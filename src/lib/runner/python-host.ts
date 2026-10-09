@@ -16,6 +16,7 @@ export type PythonRunInput = {
 	filename?: string;
 	files?: { path: string; content: string }[];
 	onOutput?: (stream: 'stdout' | 'stderr', text: string) => void;
+	onOutputLine?: (line: number, text: string) => void;
 	onInput?: () => void;
 };
 
@@ -150,6 +151,9 @@ function handleMessage(message: PythonWorkerMessage) {
 		if (message.stream === 'stdout') active.stdout = clipText(active.stdout + message.text);
 		else active.stderr = clipText(active.stderr + message.text);
 		active.input.onOutput?.(message.stream, message.text);
+		if (message.stream === 'stdout' && message.line !== undefined) {
+			active.input.onOutputLine?.(message.line, message.text);
+		}
 		return;
 	}
 	if (message.type === 'input') {
@@ -210,7 +214,8 @@ function pump() {
 		id: next.id,
 		code: next.input.code,
 		filename: next.input.filename ?? '',
-		files: next.input.files ?? []
+		files: next.input.files ?? [],
+		traceOutput: Boolean(next.input.onOutputLine)
 	});
 }
 

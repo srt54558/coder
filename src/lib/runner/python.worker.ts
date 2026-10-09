@@ -92,6 +92,7 @@ del __project_entry
 `;
 
 const mounted = new Map<string, string>();
+let activeOutputLine: number | undefined;
 
 self.onmessage = async (
 	event: MessageEvent<{
@@ -100,11 +101,12 @@ self.onmessage = async (
 		code: string;
 		filename?: string;
 		files?: { path: string; content: string }[];
+		traceOutput?: boolean;
 	}>
 ) => {
 	if (event.data.type !== 'run') return;
 
-	const { id, code, filename = '', files = [] } = event.data;
+	const { id, code, filename = '', files = [], traceOutput = false } = event.data;
 	const startedAt = performance.now();
 	let stdout = '';
 	let stderr = '';
@@ -117,7 +119,13 @@ self.onmessage = async (
 			batched: (text) => {
 				const chunk = `${text}\n`;
 				stdout = clipText(stdout + chunk);
-				send({ type: 'output', id, stream: 'stdout', text: chunk });
+				send({
+					type: 'output',
+					id,
+					stream: 'stdout',
+					text: chunk,
+					...(activeOutputLine === undefined ? {} : { line: activeOutputLine })
+				});
 			}
 		});
 		runtime.setStderr({
@@ -173,7 +181,47 @@ def input(prompt=''):
 `,
 			{ globals }
 		);
-		await runtime.runPythonAsync(code, filename ? { globals, filename } : { globals });
+		if (traceOutput) {
+			globals.set('__kplus_source', code);
+			globals.set('__kplus_filename', filename ? `/workspace/${filename}` : '<exec>');
+			globals.set('__kplus_enter_output_line', (line: number) => {
+				const previous = activeOutputLine;
+				activeOutputLine = line;
+				return previous ?? 0;
+			});
+			globals.set('__kplus_leave_output_line', (previous: number) => {
+				activeOutputLine = previous || undefined;
+			});
+			await runtime.runPythonAsync(
+				`import ast as __kplus_ast
+class __KplusPrintTrace(__kplus_ast.NodeTransformer):
+    def visit_Call(self, node):
+        node = self.generic_visit(node)
+        if isinstance(node.func, __kplus_ast.Name) and node.func.id == 'print':
+            return __kplus_ast.copy_location(__kplus_ast.Call(
+                func=__kplus_ast.Name(id='__kplus_traced_print', ctx=__kplus_ast.Load()),
+                args=[__kplus_ast.Constant(node.lineno), node.func, *node.args],
+                keywords=node.keywords,
+            ), node)
+        return node
+
+def __kplus_traced_print(line, printer, *args, **kwargs):
+    previous = __kplus_enter_output_line(line)
+    try:
+        return printer(*args, **kwargs)
+    finally:
+        __kplus_leave_output_line(previous)
+
+__kplus_tree = __kplus_ast.parse(__kplus_source, filename=__kplus_filename, mode='exec')
+__kplus_tree = __KplusPrintTrace().visit(__kplus_tree)
+__kplus_ast.fix_missing_locations(__kplus_tree)
+exec(compile(__kplus_tree, __kplus_filename, 'exec'), globals())
+`,
+				{ globals }
+			);
+		} else {
+			await runtime.runPythonAsync(code, filename ? { globals, filename } : { globals });
+		}
 
 		send({
 			type: 'result',
@@ -190,6 +238,7 @@ def input(prompt=''):
 			durationMs: performance.now() - startedAt
 		});
 	} finally {
+		activeOutputLine = undefined;
 		globals?.destroy();
 		send({ type: 'status', status: 'ready' });
 	}

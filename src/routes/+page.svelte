@@ -185,6 +185,7 @@
 	let consoleSeq = 1;
 	let consoleBlocks = $state<ConsoleBlock[]>([]);
 	let visualizerEnabled = $state(false);
+	let visualizerOutputs = $state<Record<number, string>>({});
 	let pendingPythonInput = $state<number | null>(null);
 	let pythonInputValue = $state('');
 	let pythonInputElement = $state<HTMLInputElement | null>(null);
@@ -1238,6 +1239,8 @@
 		if (runnerStatus === 'loading') return;
 		terminalCollapsed = false;
 		pendingPythonInput = null;
+		const traceVisualizerOutput = visualizerEnabled;
+		if (traceVisualizerOutput) visualizerOutputs = {};
 		runId += 1;
 		const payload = runPayload();
 		const fileId = editorFileId;
@@ -1251,6 +1254,14 @@
 			filename: payload.filename,
 			files: payload.files,
 			onOutput: (stream, text) => appendRunOutput(thisId, stream, text),
+			onOutputLine: traceVisualizerOutput
+				? (line, text) => {
+						visualizerOutputs = {
+							...visualizerOutputs,
+							[line]: `${visualizerOutputs[line] ?? ''}${text}`
+						};
+					}
+				: undefined,
 			onInput: () => requestPythonInput(thisId)
 		}).then((result) => {
 			if (runningPythonRunId === thisId) {
@@ -2988,12 +2999,13 @@
 		<ButtonGroup.Root aria-label="Ausgabe steuern">
 			{#if isPython}
 				<Button
-					variant="ghost"
-					size="icon-sm"
+					variant={visualizerEnabled ? 'secondary' : 'ghost'}
+					size="sm"
 					aria-pressed={visualizerEnabled}
 					aria-label={visualizerEnabled ? 'Programmausgabe anzeigen' : 'Programm visualisieren'}
 					title={visualizerEnabled ? 'Programmausgabe anzeigen' : 'Programm visualisieren'}
-					onclick={() => (visualizerEnabled = !visualizerEnabled)}><Blocks /></Button
+					onclick={() => (visualizerEnabled = !visualizerEnabled)}
+					><Blocks /><span>Visualisieren</span></Button
 				>
 			{/if}
 			<Button
@@ -3013,7 +3025,7 @@
 		</ButtonGroup.Root>
 	</div>
 	{#if visualizerEnabled && isPython}
-		<ProgramVisualizer code={editorCode} />
+		<ProgramVisualizer code={editorCode} outputs={visualizerOutputs} />
 	{:else}
 		{@render consoleBody()}
 	{/if}
