@@ -291,7 +291,9 @@ export function syncSharedWorkspace(doc: Y.Doc, snapshot: WorkspaceSnapshot): vo
 
 		const openIds = new Set(snapshot.openFileIds);
 		for (const id of [...tabs.keys()]) if (!openIds.has(id)) tabs.delete(id);
-		for (const id of openIds) if (files.has(id)) tabs.set(id, true);
+		for (const id of openIds) {
+			if (files.has(id) && tabs.get(id) !== true) tabs.set(id, true);
+		}
 	}, WORKSPACE_ORIGIN);
 }
 

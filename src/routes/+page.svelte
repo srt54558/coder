@@ -8,6 +8,7 @@
 	import Coffee from '@lucide/svelte/icons/coffee';
 	import Download from '@lucide/svelte/icons/download';
 	import Files from '@lucide/svelte/icons/files';
+	import Blocks from '@lucide/svelte/icons/blocks';
 	import Flower2 from '@lucide/svelte/icons/flower-2';
 	import Info from '@lucide/svelte/icons/info';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
@@ -32,6 +33,7 @@
 	import NewFileDialog from '#lib/components/new-file-dialog.svelte';
 	import WelcomeDialog from '#lib/components/welcome-dialog.svelte';
 	import CodeEditor from '#lib/components/code-editor.svelte';
+	import ProgramVisualizer from '#lib/components/program-visualizer.svelte';
 	import { takeDocsPopup } from '#lib/docs/popup.js';
 	import { languageForLessonId } from '#lib/docs/lookup.js';
 	import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js';
@@ -182,6 +184,7 @@
 
 	let consoleSeq = 1;
 	let consoleBlocks = $state<ConsoleBlock[]>([]);
+	let visualizerEnabled = $state(false);
 	let pendingPythonInput = $state<number | null>(null);
 	let pythonInputValue = $state('');
 	let pythonInputElement = $state<HTMLInputElement | null>(null);
@@ -2981,8 +2984,18 @@
 
 {#snippet terminal()}
 	<div class="pane-header">
-		<h2>Ausgabe</h2>
+		<h2>{visualizerEnabled && isPython ? 'Programmablauf' : 'Ausgabe'}</h2>
 		<ButtonGroup.Root aria-label="Ausgabe steuern">
+			{#if isPython}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					aria-pressed={visualizerEnabled}
+					aria-label={visualizerEnabled ? 'Programmausgabe anzeigen' : 'Programm visualisieren'}
+					title={visualizerEnabled ? 'Programmausgabe anzeigen' : 'Programm visualisieren'}
+					onclick={() => (visualizerEnabled = !visualizerEnabled)}><Blocks /></Button
+				>
+			{/if}
 			<Button
 				variant="ghost"
 				size="icon-sm"
@@ -2999,8 +3012,12 @@
 			>
 		</ButtonGroup.Root>
 	</div>
-	{@render consoleBody()}
-	<footer>Cmd/Strg + Enter</footer>
+	{#if visualizerEnabled && isPython}
+		<ProgramVisualizer code={editorCode} />
+	{:else}
+		{@render consoleBody()}
+	{/if}
+	<footer>{visualizerEnabled && isPython ? 'Live aktualisiert' : 'Cmd/Strg + Enter'}</footer>
 {/snippet}
 
 {#if notice}<div class="notice" role="status">{notice}</div>{/if}
