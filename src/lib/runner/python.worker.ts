@@ -182,40 +182,40 @@ def input(prompt=''):
 			{ globals }
 		);
 		if (traceOutput) {
-			globals.set('__kplus_source', code);
-			globals.set('__kplus_filename', filename ? `/workspace/${filename}` : '<exec>');
-			globals.set('__kplus_enter_output_line', (line: number) => {
+			globals.set('_kplus_source', code);
+			globals.set('_kplus_filename', filename ? `/workspace/${filename}` : '<exec>');
+			globals.set('_kplus_enter_output_line', (line: number) => {
 				const previous = activeOutputLine;
 				activeOutputLine = line;
 				return previous ?? 0;
 			});
-			globals.set('__kplus_leave_output_line', (previous: number) => {
+			globals.set('_kplus_leave_output_line', (previous: number) => {
 				activeOutputLine = previous || undefined;
 			});
 			await runtime.runPythonAsync(
-				`import ast as __kplus_ast
-class __KplusPrintTrace(__kplus_ast.NodeTransformer):
+				`import ast as _kplus_ast
+class _KplusPrintTrace(_kplus_ast.NodeTransformer):
     def visit_Call(self, node):
         node = self.generic_visit(node)
-        if isinstance(node.func, __kplus_ast.Name) and node.func.id == 'print':
-            return __kplus_ast.copy_location(__kplus_ast.Call(
-                func=__kplus_ast.Name(id='__kplus_traced_print', ctx=__kplus_ast.Load()),
-                args=[__kplus_ast.Constant(node.lineno), node.func, *node.args],
+        if isinstance(node.func, _kplus_ast.Name) and node.func.id == 'print':
+            return _kplus_ast.copy_location(_kplus_ast.Call(
+                func=_kplus_ast.Name(id='_kplus_traced_print', ctx=_kplus_ast.Load()),
+                args=[_kplus_ast.Constant(node.lineno), node.func, *node.args],
                 keywords=node.keywords,
             ), node)
         return node
 
-def __kplus_traced_print(line, printer, *args, **kwargs):
-    previous = __kplus_enter_output_line(line)
+def _kplus_traced_print(line, printer, *args, **kwargs):
+    previous = _kplus_enter_output_line(line)
     try:
         return printer(*args, **kwargs)
     finally:
-        __kplus_leave_output_line(previous)
+        _kplus_leave_output_line(previous)
 
-__kplus_tree = __kplus_ast.parse(__kplus_source, filename=__kplus_filename, mode='exec')
-__kplus_tree = __KplusPrintTrace().visit(__kplus_tree)
-__kplus_ast.fix_missing_locations(__kplus_tree)
-exec(compile(__kplus_tree, __kplus_filename, 'exec'), globals())
+_kplus_tree = _kplus_ast.parse(_kplus_source, filename=_kplus_filename, mode='exec')
+_kplus_tree = _KplusPrintTrace().visit(_kplus_tree)
+_kplus_ast.fix_missing_locations(_kplus_tree)
+exec(compile(_kplus_tree, _kplus_filename, 'exec'), globals())
 `,
 				{ globals }
 			);
